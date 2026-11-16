@@ -15,4 +15,14 @@ for n in ("panel1", "panel2"):
     f = f"{n}.mkv"
     json.dump({"words": T.transcribe(f, probe(f)["duration"], f"{n}.cache", "small")}, open(f"{n}.words.json", "w"))
 PY
+# extra validation scenes (CC BY / CC BY-SA, see validation/SOURCES.md): fetch by title via the Commons API
+python3 - <<'PY'
+import json, subprocess, urllib.parse, urllib.request
+UA = {"User-Agent": "clipper-golden/0.1 (https://github.com/vanshs22/clip)"}
+for key, title in {"bk": "Backroom Comics Podcast - Mark Waid Interview at ECCC 2010 Part 2.webm", "ch": "Ecology, Ethics, Anarchism - In Conversation with Noam Chomsky - Imperiled Life.webm"}.items():
+    q = urllib.parse.urlencode({"action": "query", "titles": "File:" + title, "prop": "imageinfo", "iiprop": "url", "format": "json"})
+    pages = json.load(urllib.request.urlopen(urllib.request.Request("https://commons.wikimedia.org/w/api.php?" + q, headers=UA)))["query"]["pages"]
+    url = list(pages.values())[0].get("imageinfo", [{}])[0].get("url")
+    print(key, url or "TITLE NOT FOUND: search Commons for the file named in validation/SOURCES.md")
+PY
 echo "golden media ready: now run  python -m clipper bench golden/golden.json"

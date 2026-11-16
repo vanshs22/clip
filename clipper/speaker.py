@@ -139,16 +139,18 @@ def main_tracks(an, share=0.4):
     return [k for k in sorted(range(len(sc)), key=lambda k: -sc[k]) if sc[k] >= share * max(sc, default=1)][:4]
 
 
-# ---- voice side: neural speaker embeddings (resemblyzer d-vectors, optional dependency) + k-means --------------------------------
+# ---- voice side: speaker embeddings (SpeechBrain ECAPA-TDNN, free, Apache-2.0) + k-means ---------------------------------------
 _ENC = []
 
 
 def voice_windows(src, t0, t1, words, win=2.0, hop=1.0, sr=16000):
-    """-> (windows [(ts, te)], d-vectors) for windows that are mostly speech. Raises ImportError without `resemblyzer`."""
+    """-> (windows [(ts, te)], embeddings) for windows that are mostly speech. Raises ImportError without `speechbrain`.
+    ECAPA beat the resemblyzer d-vector on every real scene I measured (docs/SPEC.md): clearer two-speaker clusters, fewer false 'two voices'."""
     import numpy as np
-    from resemblyzer import VoiceEncoder, preprocess_wav
+    import torch
+    from speechbrain.inference.speaker import EncoderClassifier
     if not _ENC:
-        _ENC.append(VoiceEncoder("cpu"))
+        _ENC.append(EncoderClassifier.from_hparams(source="speechbrain/spkrec-ecapa-voxceleb", savedir=str(CACHE / "ecapa"), run_opts={"device": "cpu"}))
     raw = subprocess.run([ffmpeg(), "-v", "error", "-ss", f"{t0:.3f}", "-t", f"{t1 - t0:.3f}", "-i", str(src), "-vn", "-ac", "1", "-ar", str(sr), "-f", "s16le", "-"],
                          capture_output=True).stdout
     a = np.frombuffer(raw, np.int16).astype(np.float32) / 32768
@@ -157,9 +159,10 @@ def voice_windows(src, t0, t1, words, win=2.0, hop=1.0, sr=16000):
         sp = sum(max(0, min(w["e"], t + win) - max(w["s"], t)) for w in words if w["e"] > t and w["s"] < t + win)
         if sp >= 0.6 * win:
             W.append((t, t + win))
-            E.append(_ENC[0].embed_utterance(preprocess_wav(a[int((t - t0) * sr): int((t - t0 + win) * sr)], source_sr=sr)))
+            with torch.no_grad():
+                E.append(_ENC[0].encode_batch(torch.tensor(a[int((t - t0) * sr): int((t - t0 + win) * sr)]).unsqueeze(0)).squeeze().numpy())
         t += hop
-    return W, (np.array(E) if E else np.zeros((0, 256)))
+    return W, (np.array(E) if E else np.zeros((0, 192)))
 
 
 def kmeans(X, k, seed=0, iters=30, restarts=6):
@@ -206,7 +209,7 @@ def mouth_series(tr, n):
     return np.array(out)
 
 
-SIL_MIN, SHARE_MIN = 0.3, 0.2  # measured: two real speakers 0.47-0.51; one speaker 0.07-0.20 (docs/SPEC.md)
+SIL_MIN, SHARE_MIN = 0.3, 0.2  # ECAPA, 12 real cases: two speakers 0.43-0.54; one speaker 0.07-0.21 (one 0.55 outlier has a 14% minor cluster: the share rule rejects it)
 
 
 def diarized_speakers(src, an, words, t0, t1, win=2.0):
@@ -223,7 +226,7 @@ def diarized_speakers(src, an, words, t0, t1, win=2.0):
     try:
         W, E = voice_windows(src, t0, t1, words, win)
     except ImportError:
-        return [], {"reason": "resemblyzer not installed", "reliable": False}
+        return [], {"reason": "speechbrain not installed", "reliable": False}
     if len(W) < 20:
         return [], {"reason": "not enough speech", "reliable": False}
     lab = kmeans(E, 2)

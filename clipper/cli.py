@@ -131,7 +131,7 @@ def cmd_doctor(a):
             ("yt-dlp", bool(shutil.which("yt-dlp")), "pip install yt-dlp  (URL sources)"),
             ("faster-whisper", has_mod("faster_whisper"), "pip install faster-whisper  (or pass --transcript; also enables live speech)"),
             ("panns-inference (sound events)", has_mod("panns_inference"), "pip install panns-inference  (optional: laughter/cheering signal)"),
-            ("resemblyzer (who is speaking)", has_mod("resemblyzer"), "pip install resemblyzer  (optional: active-speaker following)"),
+            ("speechbrain (who is speaking)", has_mod("speechbrain"), "pip install speechbrain  (optional: active-speaker following; downloads a 90 MB ECAPA model)"),
             ("rapidocr (on-screen text)", has_mod("rapidocr_onnxruntime"), "pip install rapidocr-onnxruntime  (optional)"),
             ("Real-ESRGAN upscaler", bool(shutil.which("realesrgan-ncnn-vulkan")), "optional: realesrgan-ncnn-vulkan on PATH for low-res sources"),
             ("YOUTUBE_API_KEY (live chat)", bool(os.environ.get("YOUTUBE_API_KEY")), "optional: your own free YouTube Data API key"),

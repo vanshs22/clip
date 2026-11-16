@@ -56,6 +56,18 @@ this sandbox (YouTube answered with a sign-in/bot check; the tool correctly repo
 | Golden set (`golden/`, run `golden/fetch.sh` then `clipper bench golden/golden.json`) | 6 human-labelled reference clips. Local-only selection: recall 1.0 and 0.67, mean start error 5.6 s and 6.6 s. Known misses: the campus free-speech answer was never a candidate; "vocational school" clip starts after its setup sentence. An LLM pass (`--mode quality`) is untested here (no key) |
 | Editor-critic on the real plan | found real problems: dependent openings, mid-clip dead air, a false "ends mid-thought" (a renderer/critic bug that I fixed) |
 
+### Round 4: fixing the limits you named (all measured on real footage)
+**Speaker thresholds (was: 8 cases, one event).** Now 4 two-person scenes from 4 different events (government panel x2, convention-floor interview, a Chomsky conversation in an office) plus 9 negatives (8 single-speaker stretches, 1 still photo with a real podcast audio track).
+With the first voice model (resemblyzer) the old 0.3 silhouette gate was fragile: one-speaker stretches reached 0.45 and two-speaker scenes were as low as 0.35, so it would have passed a false positive. Replacing the voice model with SpeechBrain ECAPA-TDNN (free, Apache-2.0) fixed it:
+two-speaker silhouettes 0.43-0.54 (purity 98-100%), one-speaker 0.06-0.16 (one 0.54 outlier and the photo case at 0.50 are refused by the smaller-cluster share rule, 8% and 15%, so the share rule is load-bearing, not decoration).
+Result: gate accepts 4/4 real scenes at 99.6% pooled accuracy and refuses 9/9 negatives. `python -m tests.validate_real speaker REF_DIR` reproduces it. Still a modest sample (4 scenes, 1 language of speech, adult speakers, English): more scenes would tighten the margins.
+
+**"Clip-length spans don't work" (was: 46-85%).** The voice-to-face mapping is a property of the whole video, but it does not need the whole video: estimated from a RANDOM 15% of the speech it was already correct for 3 of 4 scenes (98/65/95/100%), 100% from half. Per-clip estimation from a clip's own few seconds is still not reliable; the map is built once per job (`speakers` stage).
+
+**TalkNet.** Its successor Light-ASD (MIT, 1M parameters, weights in its repo) runs on CPU and I validated it on the same scenes: 91% / 84% per second on its own, 100% / 89% when only its confident half is trusted. It is accurate but slow (6.5 min per 3 min of video on this CPU) and adds nothing over the voice+mouth map that already reaches 99-100%, so I did NOT ship it: no dead code. If you need it later it is a drop-in for the mouth-motion cue.
+
+**Upscaling without a GPU.** Benchmarked on 9 real 720p frames (input = 2x downscale, truth = the original): bicubic 33.23 dB, lanczos 33.63, lanczos+unsharp 33.86 (current default), ESPCN 34.08, FSRCNN 34.17 (~100 ms/frame), LapSRN 33.74, EDSR 35.28 (34 s/frame). Viewing the faces: no method turns real faces into cartoons (unlike the anime Real-ESRGAN model), but the neural CPU models are visually indistinguishable from lanczos+unsharp. The one clearly better model (EDSR, +1.4 dB over the default) is unusable without a GPU. Decision: no new upscaler; lanczos+sharpen stays the default and `--upscale ai` stays opt-in. With a GPU, `realesrgan-x4plus` is the model to try, and it still needs a look at a frame first.
+
 ### Still not done
 TalkNet itself (replaced by the method above), a proven Kick live delivery, Video2X, AI upscaling that is safe for real faces, OpenAI judging on real data, YOLO-based tracking (removed), a golden set beyond one event.
 
