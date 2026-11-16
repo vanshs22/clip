@@ -95,7 +95,7 @@ def _signals(j, o):
     audio = [x + 90 for x in S.audio_rms(src["path"], d)] if src["info"]["audio"] else []
     visual, cuts = S.scene_density(src["path"], d) if src["info"]["width"] else ([], [])
     sig = {"speech": S.text_series(words, d), "audio": audio, "visual": visual, "chat": S.chat_series(chat, d) if chat else []}
-    jsave(j.p("signals.json"), {**sig, "chat_spikes": S.spikes(sig["chat"], min_abs=8) if chat else [], "chat_n": len(chat)})
+    jsave(j.p("signals.json"), {**sig, "cuts": cuts, "chat_spikes": S.spikes(sig["chat"], min_abs=8) if chat else [], "chat_n": len(chat)})
 
 
 def _candidates(j, o):
@@ -108,19 +108,27 @@ def _select(j, o):
     words, cs = jload(j.p("transcript.json"))["words"], jload(j.p("candidates.json"))["candidates"]
     top, cost = llm.select(words, cs, o["clips"], o["mode"], j.p("cache", "llm"), llm.Budget(o["max_calls"], o["max_tokens"]))
     layout = score.PROFILES.get(o["profile"], score.PROFILES["auto"])["layout"]
-    clips = [{**c, "id": i + 1, "caption": {"style": o["style"], "scale": 1.0}, "layout": layout, "zoom": None, "focus_x": None}
-             for i, c in enumerate(top)]
+    clips = [{**c, "id": i + 1, "caption": {"style": o["style"], "scale": 1.0}, "layout": layout, "zoom": None, "focus_x": None,
+              "zooms": auto_zoom(c, layout)} for i, c in enumerate(top)]
     jsave(j.p("plan.json"), {"clips": clips, "cost": cost})
+
+
+def auto_zoom(c, layout):
+    """Conservative: at most ONE punch-in, only on a strong clip, on the fused peak, in fill layout. Render drops it if a cut is near."""
+    d, t = c["final_end"] - c["final_start"], c["peak"] - c["final_start"] - 0.5
+    ok = layout == "fill" and c["score"] >= 0.7 and d >= 15 and 1.5 <= t <= d - 3
+    return [{"t": round(t, 2), "dur": 2.0, "amt": 1.12}] if ok else []
 
 
 def _render(j, o):
     src, words, plan = jload(j.p("source.json")), jload(j.p("transcript.json"))["words"], jload(j.p("plan.json"))
+    cuts = (jload(j.p("signals.json")) or {}).get("cuts", [])
     out, log = {}, []
     for c in plan["clips"]:
         if c.get("dropped"):
             continue
         try:
-            out[c["id"]] = str(R.render_clip(src["path"], c, j.p("renders"), words, src["info"], o["draft"]))
+            out[c["id"]] = str(R.render_clip(src["path"], c, j.p("renders"), words, src["info"], o["draft"], cuts=cuts))
         except RuntimeError as e:
             log.append(f"clip {c['id']}: {e}")  # one bad clip must not discard the others
     jsave(j.p("plan.json"), plan)  # focus_x discovered during render is persisted
@@ -141,6 +149,6 @@ def _qc(j, o):
         else:
             iss.append("render_failed")
         rep["clips"].append({"id": c["id"], "file": f, "start": hms(c["final_start"]), "end": hms(c["final_end"]),
-                             "score": c["final_score"], "title": c.get("title", ""), "issues": iss, "pass": not iss})
+                             "score": c["final_score"], "title": c.get("title", ""), "issues": iss, "warnings": c.get("warn", []), "pass": not iss})
     rep["errors"] = ren["errors"]
     jsave(j.p("report.json"), rep)

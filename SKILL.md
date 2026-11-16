@@ -27,7 +27,7 @@ Tell the user plainly what `doctor` reports missing. Do not work around it silen
 ## Workflow
 1. `process ... --stop-after select`: download, transcribe, detect, rank. Writes `plan.json`.
 2. `clipper status JOB`: show the user each clip (time, title, text, issues, LLM cost). One question: keep / change / drop?
-3. Edits (only that clip re-renders): `clipper edit JOB 3 --start-shift -3`, `--end-shift 2`, `--captions karaoke`, `--caption-scale 0.8`, `--zoom 1.15`, `--layout fit`, `--focus-x 0.3`, `--drop`.
+3. Edits (only that clip re-renders): `clipper edit JOB 3 --start-shift -3`, `--end-shift 2`, `--captions karaoke`, `--caption-scale 0.8`, `--zoom-at 12.5 --zoom-for 2 --zoom-amt 1.12` (punch-in on a named punchline; `--no-zooms` clears), `--zoom 1.15` (whole clip), `--layout fit`, `--focus-x 0.3`, `--drop`.
 4. `clipper render JOB --draft` (540x960 quick look), then `clipper render JOB --no-draft`.
 5. Every clip must show `OK`. A `FIX` lists issue codes: see `docs/SPEC.md` section QC for the fix for each. Max 3 fix rounds, then tell the user what is left.
 6. `clipper export JOB --out DIR`: mp4 + `metadata.json` (titles, times, cost).
@@ -38,5 +38,8 @@ Tell the user plainly what `doctor` reports missing. Do not work around it silen
 - Say what you did not verify. If you cannot view images, say so. Never write "looks good" without opening a frame.
 - Never upload or publish. Never send media to any API: only compact transcript text goes to the LLM.
 - Chat spikes are candidates, not proof. Report API cost (`status` shows calls/tokens/USD).
-- Not implemented yet (say so if asked): live speech transcription, YOLO/TalkNet speaker tracking, Real-ESRGAN upscaling, Kick/YouTube live-chat adapters, MCP/HTTP wrappers. See `docs/SPEC.md` roadmap.
+- Reframing is per shot: the crop can change only at a scene cut. The plan may hold ONE auto punch-in on a strong clip; it is dropped if a cut is near. A `low_res_source` warning means the source is too small for clean 1080x1920: tell the user, do not hide it.
+- Other agents: `clipper mcp` (MCP stdio: clip_video, get_job_status, get_clip_candidates, edit_clip, render_clips, export_clips, monitor_livestream, get_task) or `clipper serve` (HTTP on 127.0.0.1, bearer token printed at start). Slow tools return a task id; poll `get_task`.
+- Measure changes with `clipper bench golden.json` (recall, boundary error, issue rate against reviewed timestamps).
+- Not implemented yet (say so if asked): phase 2 in `docs/SPEC.md` (live Whisper, YouTube/Kick live chat, PANNs/YOLO/TalkNet/OCR, AI upscaling, multi-speaker layouts, B-roll/music).
 - Append lessons to `memory/learnings.md` after each job.

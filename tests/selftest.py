@@ -1,7 +1,7 @@
 """One runnable check: `clipper selftest` (or python -m tests.selftest). Offline; the ffmpeg e2e part is skipped if no ffmpeg."""
-import json, random, re, subprocess, tempfile
+import json, os, random, re, subprocess, sys, tempfile, time, urllib.request
 from pathlib import Path
-from clipper import boundaries as B, captions, job as J, live, llm, signals as S, render as R
+from clipper import bench, boundaries as B, captions, job as J, live, llm, signals as S, render as R
 from clipper.util import ffmpeg, probe
 
 
@@ -68,6 +68,22 @@ def check_captions():
     assert all(len(c) <= 3 for c in big)
 
 
+def check_edit_rules():
+    cr = R.shot_cuts(100, 130, [100.5, 110, 110.8, 129.5, 120])
+    assert cr == [10.0, 20.0], cr                       # cuts near edges / each other are noise
+    one = R.crop_expr([0.48, 0.5, 0.52], [10, 20])
+    assert "if(" not in one                             # shots agree -> no movement at all
+    pw = R.crop_expr([0.2, 0.7], [10])
+    assert pw == "if(lt(t,10),0.200,0.700)"             # changes only at the cut, never interpolates
+    assert "0.120*max(0" in R.zoom_expr(1, [{"t": 3, "dur": 2, "amt": 1.12}])
+
+
+def check_bench():
+    clips = [{"final_start": 10, "final_end": 40, "issues": []}, {"final_start": 100, "final_end": 120, "issues": ["dead_air"]}]
+    r = bench.score_plan(clips, [{"start": 12, "end": 41}, {"start": 500, "end": 530}])
+    assert r == {"recall": 0.5, "start_err": 2.0, "end_err": 1.0, "issue_rate": 0.5}, r
+
+
 def check_llm(tmp):
     words = gen(TEXT)
     sents = B.sentences(words)
@@ -108,6 +124,13 @@ def check_e2e(tmp):
         i = probe(c["file"])
         assert (i["width"], i["height"]) == (1080, 1920) and i["audio"], (c, i)
         assert c["pass"], c                              # boundary + render QC pass end to end
+    # scene-aware crop + motivated zoom: a cut at 6 s with different focus per shot, a zoom inside shot 2, one crossing the cut (dropped)
+    c = {"id": 9, "final_start": 3.0, "final_end": 15.0, "caption": {"style": "boxed"}, "layout": "fill", "focus_auto": [0.2, 0.8],
+         "zooms": [{"t": 4.0, "dur": 3.0, "amt": 1.2}, {"t": 7.0, "dur": 2.0, "amt": 1.15}]}
+    o = R.render_clip(vid, c, tmp / "sc", words, probe(vid), cuts=[9.0])
+    assert not R.qc(o, c)[0], R.qc(o, c)
+    # 720p source cropped to 9:16 then scaled to 1920 high = 2.7x -> flagged
+    assert c["warn"] == ["low_res_source"]
     # resume: nothing re-runs; an edit re-renders only the touched clip
     stamp = {c["id"]: Path(c["file"]).stat().st_mtime_ns for c in rep["clips"]}
     plan = json.loads(j.p("plan.json").read_text())
@@ -127,10 +150,46 @@ def check_e2e(tmp):
     assert f and abs(probe(f)["duration"] - 15) < 1.5, f
 
 
+def check_server(tmp):
+    from clipper import server
+    for bad in ({"src": "-x"}, {"src": "a", "evil": 1}, {"src": "a", "style": "nope"}):
+        try:
+            server.build_argv("clip_video", bad)
+            raise AssertionError(bad)
+        except server.ToolError:
+            pass
+    assert server.build_argv("render_clips", {"job": "0123456789", "draft": False})[0] == ["render", "0123456789", "--no-draft"]
+    tmp = Path(tmp)
+    if not (tmp / "t.mp4").exists():
+        return
+    env = {**os.environ, "CLIPPER_JOBS": str(tmp / "jobs2"), "PYTHONPATH": str(Path(__file__).resolve().parents[1])}
+    p = subprocess.Popen([sys.executable, "-m", "clipper", "mcp"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, cwd=tmp, env=env)
+
+    def rpc(i, method, params=None):
+        p.stdin.write(json.dumps({"jsonrpc": "2.0", "id": i, "method": method, "params": params or {}}) + "\n")
+        p.stdin.flush()
+        return json.loads(p.stdout.readline())["result"]
+    try:
+        assert rpc(1, "initialize", {"protocolVersion": "2024-11-05"})["serverInfo"]["name"] == "clipper"
+        assert {"clip_video", "edit_clip", "monitor_livestream"} <= {t["name"] for t in rpc(2, "tools/list")["tools"]}
+        assert rpc(3, "tools/call", {"name": "clip_video", "arguments": {"src": "x", "style": "nope"}})["isError"]
+        r = json.loads(rpc(4, "tools/call", {"name": "clip_video", "arguments": {"src": "t.mp4", "transcript": "words.json", "mode": "disabled", "clips": 2, "stop_after": "select"}})["content"][0]["text"])
+        for _ in range(120):                       # queued task runs in the persistent worker
+            t = json.loads(rpc(5, "tools/call", {"name": "get_task", "arguments": {"task": r["task"]}})["content"][0]["text"])
+            if t["status"] in ("done", "failed"):
+                break
+            time.sleep(1)
+        assert t["status"] == "done", t
+        st = json.loads(rpc(6, "tools/call", {"name": "get_job_status", "arguments": {"job": r["job"]}})["content"][0]["text"])
+        assert st["clips"], st
+    finally:
+        p.kill()
+
+
 def main():
     with tempfile.TemporaryDirectory() as d:
-        for name, fn in [("boundaries", check_boundaries), ("signals", check_signals), ("captions", check_captions),
-                         ("llm", lambda: check_llm(d + "/c")), ("e2e", lambda: check_e2e(d))]:
+        for name, fn in [("boundaries", check_boundaries), ("signals", check_signals), ("captions", check_captions), ("edit rules", check_edit_rules), ("bench", check_bench),
+                         ("llm", lambda: check_llm(d + "/c")), ("e2e", lambda: check_e2e(d)), ("server", lambda: check_server(d))]:
             fn()
             print("ok ", name)
     print("All checks passed")

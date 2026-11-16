@@ -30,6 +30,15 @@ Chat spikes use rolling median + 6 x MAD, so there is no fixed threshold.
 | silent_tail | `--end-shift -N` |
 | render_failed | read `report.json` errors, fix the named input |
 
-## Roadmap (honest status)
-Done: ingest (yt-dlp/file/HLS), chunked resumable Whisper, signal fusion, boundary engine, LLM judge with budget/cache, 4 caption presets, fill/fit layouts, static face-centred crop (OpenCV optional), loudness -14 LUFS, QC, edit ops, live buffer + chat/audio spikes + preliminary clips (Twitch chat).
-Not yet: live Whisper, YouTube/Kick live chat, PANNs/YOLO/TalkNet/RapidOCR signals, animated zoom/scene-aware crop, Real-ESRGAN/Video2X, MCP + HTTP wrapper, persistent worker queue, golden-video benchmark set. Each plugs in as a new series in `signals.py` or a filter in `render.vfilter`.
+## Roadmap
+### Phase 1 (done)
+Scene-aware per-shot crop (never animates across a cut), motivated punch-in zoom (max one automatic), lanczos+sharpen and `low_res_source` warning, persistent SQLite task queue, MCP (stdio) and HTTP (localhost, token, Host check, argument validation) wrappers, `bench` golden-set scorer. Earlier: ingest, chunked resumable Whisper, signal fusion, boundary engine, LLM judge with budget/cache, 4 caption presets, fill/fit layouts, loudness, QC, edit ops, live buffer + Twitch chat/audio spikes.
+
+### Phase 2 (not started; needs models, a GPU or live platform access to verify)
+1. Live Whisper on the rolling buffer; feed speech spikes into `live.monitor`.
+2. YouTube live chat and Kick chat adapters (Twitch exists).
+3. Extra signal series in `signals.py`: PANNs audio events, YOLOv8 pose/face, RapidOCR on-screen text.
+4. TalkNet active speaker; multi-speaker split layouts; smooth in-shot face tracking in `render.vfilter`.
+5. AI upscaling (Real-ESRGAN/Video2X) when `low_res_source`; today only lanczos+sharpen.
+6. Optional B-roll, user-supplied music, audio cleanup.
+7. A real golden set (podcast, gaming, interview, comedy, sports) with reviewed timestamps for `clipper bench`.

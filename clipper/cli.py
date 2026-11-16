@@ -62,6 +62,8 @@ def cmd_edit(a):
     j = get(a)
     plan, words = jload(j.p("plan.json")), jload(j.p("transcript.json"))["words"]
     c = next((c for c in plan["clips"] if c["id"] == a.clip), None) or sys.exit("no such clip")
+    if a.start_shift or a.end_shift:
+        c["focus_auto"] = None  # shots changed
     if a.start_shift:
         c["final_start"] = round(max(0.0, c["final_start"] + a.start_shift), 3)
     if a.end_shift:
@@ -72,6 +74,10 @@ def cmd_edit(a):
         c["caption"]["scale"] = a.caption_scale
     if a.zoom is not None:
         c["zoom"] = None if a.zoom <= 1 else a.zoom
+    if a.zoom_at is not None:
+        c.setdefault("zooms", []).append({"t": a.zoom_at, "dur": a.zoom_for, "amt": a.zoom_amt})
+    if a.no_zooms:
+        c["zooms"] = []
     if a.layout:
         c["layout"] = a.layout
     if a.focus_x is not None:
@@ -143,6 +149,22 @@ def cmd_doctor(a):
         print(f"     encoder: {enc}")
 
 
+def cmd_bench(a):
+    from . import bench
+    for r in bench.run(a.golden, n=a.clips):
+        print(json.dumps(r))
+
+
+def cmd_serve(a):
+    from . import server
+    server.http(a.port)
+
+
+def cmd_mcp(a):
+    from . import server
+    server.mcp()
+
+
 def cmd_selftest(a):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from tests import selftest
@@ -172,6 +194,9 @@ def main(argv=None):
     s.add_argument("--captions", choices=["bold_pop", "karaoke", "clean_lower", "boxed", "none"]), s.add_argument("--caption-scale", type=float)
     s.add_argument("--zoom", type=float, help="1.0 = none"), s.add_argument("--layout", choices=["fill", "fit"])
     s.add_argument("--focus-x", type=float), s.add_argument("--drop", action="store_true")
+    s.add_argument("--zoom-at", type=float, help="punch-in at clip-relative seconds (use on a named punchline)")
+    s.add_argument("--zoom-for", type=float, default=2.0), s.add_argument("--zoom-amt", type=float, default=1.12)
+    s.add_argument("--no-zooms", action="store_true")
     s.set_defaults(f=cmd_edit)
     s = sp.add_parser("render")
     s.add_argument("job"), s.add_argument("--draft", action=argparse.BooleanOptionalAction, default=None)
@@ -184,6 +209,13 @@ def main(argv=None):
     s.add_argument("--latency", type=float, default=8.0, help="chat-vs-video delay in seconds"), s.add_argument("--no-record", action="store_true")
     s.add_argument("--max-seconds", type=float)
     s.set_defaults(f=cmd_monitor)
+    s = sp.add_parser("bench", help="score selection/boundaries against reviewed reference timestamps")
+    s.add_argument("golden"), s.add_argument("--clips", type=int)
+    s.set_defaults(f=cmd_bench)
+    s = sp.add_parser("serve", help="local HTTP API (127.0.0.1, bearer token printed at start)")
+    s.add_argument("--port", type=int, default=8765)
+    s.set_defaults(f=cmd_serve)
+    sp.add_parser("mcp", help="MCP server over stdio").set_defaults(f=cmd_mcp)
     sp.add_parser("doctor").set_defaults(f=cmd_doctor)
     sp.add_parser("selftest").set_defaults(f=cmd_selftest)
     a = p.parse_args(argv)
