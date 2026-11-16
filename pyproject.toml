@@ -1,0 +1,19 @@
+[project]
+name = "clipper"
+version = "0.1.0"
+description = "Agent-callable AI video clipping skill: local-first detection, exact boundaries, ASS captions, FFmpeg rendering"
+requires-python = ">=3.10"
+dependencies = []                      # core is stdlib + ffmpeg
+
+[project.optional-dependencies]
+url = ["yt-dlp", "streamlink"]
+stt = ["faster-whisper"]
+vision = ["opencv-python-headless"]
+ffmpeg = ["imageio-ffmpeg"]
+all = ["yt-dlp", "streamlink", "faster-whisper", "opencv-python-headless", "imageio-ffmpeg"]
+
+[project.scripts]
+clipper = "clipper.cli:main"
+
+[tool.setuptools]
+packages = ["clipper"]

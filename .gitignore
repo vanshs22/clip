@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+clipper-jobs/
+live-out/
+.venv/
+*.egg-info/
