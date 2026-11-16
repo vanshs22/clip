@@ -1,0 +1,92 @@
+{
+ "about": "Human-labelled real scenes (public domain / CC BY) + see golden/synthetic.py for a constructed set. Videos are NOT in git: run golden/fetch.sh. Coverage: interviews/panels/podcast-style conversation ONLY. There is NO human-labelled gaming, comedy, IRL or sports video here: results say nothing about those.",
+ "entries": [
+  {
+   "video": "golden/media/panel1.mkv",
+   "transcript": "golden/media/panel1.words.json",
+   "profile": "interview",
+   "refs": [
+    {
+     "start": 135.9,
+     "end": 174.0,
+     "why": "vocational-school story: setup (push for vocational schools), anecdote, punchline 'that's what he liked'"
+    },
+    {
+     "start": 84.2,
+     "end": 101.1,
+     "why": "tax cuts for millennials: claim, consequence, 'more money in your paycheck'"
+    },
+    {
+     "start": 12.4,
+     "end": 38.4,
+     "why": "interviewer's setup: 'historic', then the millennial tax cut line"
+    }
+   ],
+   "type": "interview-panel"
+  },
+  {
+   "video": "golden/media/panel2.mkv",
+   "transcript": "golden/media/panel2.words.json",
+   "profile": "interview",
+   "refs": [
+    {
+     "start": 69.2,
+     "end": 93.4,
+     "why": "campus free-speech answer: 'great question', numbers are different, majority want free speech"
+    },
+    {
+     "start": 141.5,
+     "end": 160.0,
+     "why": "'what advice for the 25-year-old Trump?' and the answer 'Don't run for president.'"
+    },
+    {
+     "start": 0.0,
+     "end": 19.9,
+     "why": "regulations claim: 'never been an administration...', cutting regulations matters more than tax"
+    }
+   ],
+   "type": "interview-panel"
+  },
+  {
+   "video": "golden/media/bk.mkv",
+   "transcript": "golden/media/bk.words.json",
+   "profile": "interview",
+   "type": "interview-two-person",
+   "refs": [
+    {
+     "start": 37.0,
+     "end": 75.8,
+     "why": "guest's answer: 'Not really, first regular assignment' -> 'no plan so much as an idea Wally could be the first sidekick to step up'"
+    },
+    {
+     "start": 76.8,
+     "end": 104.4,
+     "why": "payoff of the Wally idea: 'rare at the time ... still kid-flash ... never going to be the hero his uncle was'"
+    },
+    {
+     "start": 17.0,
+     "end": 36.5,
+     "why": "the interviewer's question: 'when you started writing The Flash did you have an outline? ... so you had a plan from the beginning?'"
+    }
+   ]
+  },
+  {
+   "video": "golden/media/ch.mkv",
+   "transcript": "golden/media/ch.words.json",
+   "profile": "interview",
+   "type": "interview-two-person",
+   "refs": [
+    {
+     "start": 7.0,
+     "end": 32.5,
+     "why": "claim: anarchism flows from the Enlightenment's commitments"
+    },
+    {
+     "start": 111.0,
+     "end": 141.5,
+     "why": "answer: really existing capitalist democracy is state capitalism, markets shaped by state power"
+    }
+   ]
+  }
+ ]
+}

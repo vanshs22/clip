@@ -1,0 +1,163 @@
+{
+ "clips": [
+  {
+   "file": "clip_01_0575860688ba1be7.mp4",
+   "title": "",
+   "start": "0:00:09",
+   "end": "0:00:43",
+   "text": "It's a great character piece into basically when Wally was changing. This is when Wally, so I guess the question is, when you started writing The Flash, did you have an outline from the very beginning, I want to take Wally from where he is now, which was still kind of a self -absorbed guy, and obviously he wasn't as fast as he was. Two, you wanted to make him into the hero that you knew he could be. So you had a plan from the beginning? Not really, because it was my first regular assignment of any import whatsoever.",
+   "score": 0.7312,
+   "boundary_quality": 1.0,
+   "warnings": [
+    "low_res_source"
+   ],
+   "issues": []
+  },
+  {
+   "file": "clip_02_97abd149ca31931a.mp4",
+   "title": "",
+   "start": "0:01:59",
+   "end": "0:02:24",
+   "text": "Sure, sure. That made him realize at the end of that story, alright, I am my own man. I have matured, I have grown into the role. Yeah, that's great. Thank you. And so then what do you, personally, and maybe you have to be diplomatic, how do you feel about the return of Barry Allen? Not the comic that you wrote, that was great, but the actual rebirth of Barry in the universe.",
+   "score": 0.6824,
+   "boundary_quality": 1.0,
+   "warnings": [
+    "low_res_source"
+   ],
+   "issues": []
+  },
+  {
+   "file": "clip_03_5db74190118f42b3.mp4",
+   "title": "",
+   "start": "0:00:44",
+   "end": "0:01:16",
+   "text": "The book was not doing well in sales just because the TV show had been over for a little while, and so the expectation in DC was, well, then the book will eventually just die out. So there was that sort of that gave me the freedom, the safety net, to be able to do kind of whatever I felt like doing. I didn't really have a plan so much as I just had an idea that Wally, in my mind, had a chance to be the first sidekick ever to step into the shoes of his mentor, fully and totally.",
+   "score": 0.582,
+   "boundary_quality": 1.0,
+   "warnings": [
+    "low_res_source"
+   ],
+   "issues": []
+  }
+ ],
+ "not_exported": [],
+ "run": {
+  "run_id": "2ce26b57888b",
+  "profile": "podcast",
+  "openai": {
+   "calls": 0,
+   "cache_hits": 0,
+   "tokens_in": 0,
+   "tokens_out": 0,
+   "usd": 0.0,
+   "caps": {
+    "calls": 6,
+    "tokens": 60000,
+    "usd": 0.1
+   },
+   "rejected_responses": 0,
+   "local_fallbacks": 0,
+   "mode": "smart",
+   "provider": null
+  },
+  "local_models": [
+   "(transcript supplied)",
+   "PANNs",
+   "RapidOCR",
+   "SpeechBrain ECAPA",
+   "YuNet"
+  ],
+  "features_skipped": {
+   "LLM judging": "no OPENAI_API_KEY and no Ollama: using local scoring only",
+   "hardware encoder h264_nvenc": "listed by ffmpeg but a test encode failed or it is not available",
+   "hardware encoder h264_qsv": "listed by ffmpeg but a test encode failed or it is not available",
+   "hardware encoder h264_amf": "listed by ffmpeg but a test encode failed or it is not available"
+  },
+  "encoder": "libx264"
+ },
+ "verdicts": {
+  "run": {
+   "run_id": "2ce26b57888b",
+   "profile": "podcast",
+   "openai": {
+    "calls": 0,
+    "cache_hits": 0,
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "usd": 0.0,
+    "caps": {
+     "calls": 6,
+     "tokens": 60000,
+     "usd": 0.1
+    },
+    "rejected_responses": 0,
+    "local_fallbacks": 0,
+    "mode": "smart",
+    "provider": null
+   },
+   "local_models": [
+    "(transcript supplied)",
+    "PANNs",
+    "RapidOCR",
+    "SpeechBrain ECAPA",
+    "YuNet"
+   ],
+   "features_skipped": {
+    "LLM judging": "no OPENAI_API_KEY and no Ollama: using local scoring only",
+    "hardware encoder h264_nvenc": "listed by ffmpeg but a test encode failed or it is not available",
+    "hardware encoder h264_qsv": "listed by ffmpeg but a test encode failed or it is not available",
+    "hardware encoder h264_amf": "listed by ffmpeg but a test encode failed or it is not available"
+   },
+   "encoder": "libx264"
+  },
+  "clips_passing": 3,
+  "clips_total": 3,
+  "verdicts": {
+   "1": {
+    "overall": 99,
+    "verdict": "pass",
+    "assessed": [
+     "craft",
+     "eye_trace",
+     "plane",
+     "rhythm",
+     "space",
+     "story"
+    ],
+    "unassessed": [
+     "emotion"
+    ]
+   },
+   "2": {
+    "overall": 98,
+    "verdict": "revise",
+    "assessed": [
+     "craft",
+     "eye_trace",
+     "plane",
+     "rhythm",
+     "space",
+     "story"
+    ],
+    "unassessed": [
+     "emotion"
+    ]
+   },
+   "3": {
+    "overall": 99,
+    "verdict": "pass",
+    "assessed": [
+     "craft",
+     "eye_trace",
+     "plane",
+     "rhythm",
+     "space",
+     "story"
+    ],
+    "unassessed": [
+     "emotion"
+    ]
+   }
+  }
+ }
+}

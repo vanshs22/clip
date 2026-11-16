@@ -1,0 +1,7 @@
+{"t": 1794856250.332, "event": "stage_start", "job": "5a280f0da6", "stage": "ingest"}
+{"t": 1794856250.376, "event": "stage_done", "job": "5a280f0da6", "stage": "ingest", "seconds": 0.0}
+{"t": 1794856250.379, "event": "stage_start", "job": "5a280f0da6", "stage": "transcribe"}
+{"t": 1794856250.382, "event": "stage_done", "job": "5a280f0da6", "stage": "transcribe", "seconds": 0.0}
+{"t": 1794856250.387, "event": "stage_start", "job": "5a280f0da6", "stage": "signals"}
+{"t": 1794856266.771, "event": "stage_done", "job": "5a280f0da6", "stage": "signals", "seconds": 16.4}
+{"t": 1794856266.778, "event

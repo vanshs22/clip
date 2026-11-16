@@ -1,0 +1,97 @@
+{
+ "clips": [
+  {
+   "id": 1,
+   "file": "jobs/5a280f0da6/renders/clip_01_0575860688ba1be7.mp4",
+   "start": "0:00:09",
+   "end": "0:00:43",
+   "score": 0.7312,
+   "title": "",
+   "issues": [],
+   "warnings": [
+    "low_res_source"
+   ],
+   "boundary_quality": 1.0,
+   "pass": true
+  },
+  {
+   "id": 2,
+   "file": "jobs/5a280f0da6/renders/clip_02_97abd149ca31931a.mp4",
+   "start": "0:01:59",
+   "end": "0:02:24",
+   "score": 0.6824,
+   "title": "",
+   "issues": [],
+   "warnings": [
+    "low_res_source"
+   ],
+   "boundary_quality": 1.0,
+   "pass": true
+  },
+  {
+   "id": 3,
+   "file": "jobs/5a280f0da6/renders/clip_03_5db74190118f42b3.mp4",
+   "start": "0:00:44",
+   "end": "0:01:16",
+   "score": 0.582,
+   "title": "",
+   "issues": [],
+   "warnings": [
+    "low_res_source"
+   ],
+   "boundary_quality": 1.0,
+   "pass": true
+  }
+ ],
+ "cost": {
+  "calls": 0,
+  "cache_hits": 0,
+  "tokens_in": 0,
+  "tokens_out": 0,
+  "usd": 0.0,
+  "caps": {
+   "calls": 6,
+   "tokens": 60000,
+   "usd": 0.1
+  },
+  "rejected_responses": 0,
+  "local_fallbacks": 0,
+  "mode": "smart",
+  "provider": null
+ },
+ "errors": [],
+ "run": {
+  "run_id": "2ce26b57888b",
+  "profile": "podcast",
+  "openai": {
+   "calls": 0,
+   "cache_hits": 0,
+   "tokens_in": 0,
+   "tokens_out": 0,
+   "usd": 0.0,
+   "caps": {
+    "calls": 6,
+    "tokens": 60000,
+    "usd": 0.1
+   },
+   "rejected_responses": 0,
+   "local_fallbacks": 0,
+   "mode": "smart",
+   "provider": null
+  },
+  "local_models": [
+   "(transcript supplied)",
+   "PANNs",
+   "RapidOCR",
+   "SpeechBrain ECAPA",
+   "YuNet"
+  ],
+  "features_skipped": {
+   "LLM judging": "no OPENAI_API_KEY and no Ollama: using local scoring only",
+   "hardware encoder h264_nvenc": "listed by ffmpeg but a test encode failed or it is not available",
+   "hardware encoder h264_qsv": "listed by ffmpeg but a test encode failed or it is not available",
+   "hardware encoder h264_amf": "listed by ffmpeg but a test encode failed or it is not available"
+  },
+  "encoder": "libx264"
+ }
+}
