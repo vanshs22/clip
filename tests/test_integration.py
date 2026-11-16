@@ -243,3 +243,14 @@ def test_live_extraction_is_frame_accurate_and_live_judge_shares_the_budget(spok
     b_final = llm.Budget.load(bf, 3, 60000, 0.1)
     llm.judge(live_words, [dict(cand)], monkey, b_final, cache)  # the final VOD pass asks the same thing
     assert len(seen) == 1 and b_final.calls == 1 and b_final.cached == 1
+
+
+def test_event_only_highlight_survives_the_critics_and_polish_and_is_exported(tmp_path, ff):
+    """Regression: the critics demanded speech, 'no_speech' dropped the only (visual/audio) highlight, and the one-shot run exported 0 clips."""
+    v = synth.make_video(tmp_path / "e.mp4", dur=60, a_windows=[(0, 60)], beeps=[30, 31, 32], cuts=[15, 29, 34])  # busy picture + a loud 3 s reaction burst, no speech
+    (tmp_path / "w.json").write_text(json.dumps({"words": []}))
+    j, fr = flow.run_video(str(v), tmp_path / "jobs", clips=2, export_dir=tmp_path / "out", log=lambda *_: None, mode="disabled", transcript=str(tmp_path / "w.json"), profile="gaming", speakers="off", quality="draft")
+    meta = json.loads((tmp_path / "out" / "metadata.json").read_text())
+    assert meta["clips"], "an event-only highlight must be exported"
+    assert not any(c.get("dropped") for c in util.jload(j.p("plan.json"))["clips"][:1])
+    assert all(f["code"] != "no_speech" for r in C.load_reports(j).values() for cl in r["clips"].values() for f in cl["findings"])

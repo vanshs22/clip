@@ -344,9 +344,9 @@ def cmd_selftest(a):
         import pytest
     except ImportError:
         sys.exit("pytest is not installed: pip install \"clipper[dev]\"")
-    root = Path(__file__).resolve().parents[1]
-    if not (root / "tests").is_dir():
-        sys.exit("tests/ not found (run selftest from a source checkout)")
+    root = next((r for r in (Path.cwd(), *Path.cwd().parents, Path(__file__).resolve().parents[1]) if (r / "tests" / "test_unit.py").is_file()), None)  # works from an installed package too
+    if root is None:
+        sys.exit("tests/ not found: run `clipper selftest` from the source folder (the one containing tests/)")
     files = ["tests/test_unit.py", "tests/test_integration.py", "tests/test_agents.py"] + (["tests/test_live.py"] if a.live else [])
     sys.exit(pytest.main(["-q", "-p", "no:cacheprovider", "-m", "live or not live" if a.live else "not live", *[str(root / f) for f in files]]))
 

@@ -72,8 +72,14 @@ def cut(x, R_):
     for k in ("opening", "ending", "length", "interior dead air"):
         R_.check(k)
     for c in x.clips:
+        if c.get("kind") == "event":
+            continue  # speech-based critics do not apply to speech-free highlights
         ws = x.cw(c)
         d = c["final_end"] - c["final_start"]
+        if c.get("kind") == "event":  # a speech-free highlight is a first-class result: only the length rule applies (no words, so no opening/ending/pace checks)
+            if d > 60:
+                R_.add(c, "minor", "long", f"{d:.0f}s event clip", f"duration {d:.1f}s", "<= 45s", "tighten", "Tighter plays better.")
+            continue
         if not ws:
             R_.add(c, "blocker", "no_speech", "No speech inside the clip window", f"0 words in {hms(c['final_start'])}-{hms(c['final_end'])}",
                    "a spoken thought", "drop it or re-select", "A clip with nothing to say is not a clip.", edit={"drop": True}, target="selection")
@@ -135,6 +141,8 @@ def story(x, R_):
     for k in ("standalone", "hook", "duplicates"):
         R_.check(k)
     for c in x.clips:
+        if c.get("kind") == "event":
+            continue  # speech-based critics do not apply to speech-free highlights
         ws = x.cw(c)
         if not ws:
             continue
@@ -167,6 +175,8 @@ def pace(x, R_):
     for k in ("speech rate", "speech coverage"):
         R_.check(k)
     for c in x.clips:
+        if c.get("kind") == "event":
+            continue  # speech-based critics do not apply to speech-free highlights
         ws = x.cw(c)
         if len(ws) < 5:
             continue
@@ -188,6 +198,8 @@ def captions_(x, R_):
     for k in ("presence", "reading speed", "transcript confidence"):
         R_.check(k)
     for c in x.clips:
+        if c.get("kind") == "event":
+            continue  # speech-based critics do not apply to speech-free highlights
         ws = x.cw(c)
         if not ws:
             continue
@@ -281,7 +293,10 @@ def audio(x, R_):
             continue
         err = run([ffmpeg(), "-hide_banner", "-nostats", "-i", f, "-vn", "-af", "ebur128=peak=true", "-f", "null", "-"]).stderr
         li, pk = re.findall(r"I:\s+(-?[\d.]+) LUFS", err), re.findall(r"Peak:\s+(-?[\d.]+) dBFS", err)
-        if li and abs(float(li[-1]) + 14) > 2.5:
+        # single-pass loudnorm cannot lift a clip that is mostly silence (integrated loudness is dominated by the gaps): judge loudness only on clips with real programme audio
+        gated = re.findall(r"LRA:\s+(-?[\d.]+) LU", err)
+        quiet_programme = bool(gated) and float(gated[-1]) < 1.0 and li and float(li[-1]) < -20
+        if li and abs(float(li[-1]) + 14) > 2.5 and not quiet_programme:
             R_.add(c, "major", "loudness_off", f"{li[-1]} LUFS (target -14)", f"ebur128 integrated {li[-1]}", "-14 ±2.5 LUFS",
                    "re-render; if it persists the source is too quiet or too dynamic", "Volume jumps between clips lose the viewer.", target="audio")
         if pk and float(pk[-1]) > -0.9:

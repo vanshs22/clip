@@ -2,7 +2,7 @@
 
 Everything below was run on this release's code. "Verified" means executed here with the result shown. "Unverified" means implemented and tested only with mocks or constructed inputs.
 
-## Automated tests (`pytest`, 103 tests, all passing)
+## Automated tests (`pytest`, 104 tests, all passing)
 | layer | file | tests | what it covers |
 |---|---|---|---|
 | unit | `tests/test_unit.py` | 75 | boundary engine on 8 hard cases (unpunctuated run, mid-sentence pause, delayed answer, delayed punchline + laughter tail, interrupting speakers, reaction after the statement, transcript ending at video end, sentence across a scene cut); chat spikes and spam/giveaway filtering; bounded detector memory; event-only candidates; LLM index-window validation, hard budget (reservation before the call, USD/token/call caps), retries with backoff, malformed JSON, key redaction, provider fallback; job identity and per-stage invalidation; model manager (resume, checksum, corruption, offline); 9 caption presets + custom; crop/zoom maths; encoder test-encode fallback; hostile-source rejection; path and archive traversal; Kick signature, replay, idempotency; `audio_rms` regression |
@@ -10,7 +10,7 @@ Everything below was run on this release's code. "Verified" means executed here 
 | agents / security | `tests/test_agents.py` | 9 | MCP initialize/list/ping/unknown method, argument validation (11 hostile inputs), non-blocking tools, task lifecycle, **cancel kills a real process tree**, capabilities never leak secrets, HTTP auth/Host/size, loopback bind, queue recovery only for dead workers |
 | live (real RTMP via MediaMTX) | `tests/test_live.py` | 4 | watch -> detect -> auto-finalize -> process -> export with no second command (states recording < finalizing < processing < done; preliminary clip cut mid-stream; chat+audio event); interrupted session resumed; stream drop and return reconnects and joins parts; CANCEL marker |
 
-Run: `clipper selftest` (offline, 99 tests) and `clipper selftest --live` (adds the 4 RTMP tests). Full run: 103 passed in 5m44s (Python 3.11, Linux, CPU).
+Run: `clipper selftest` (offline, 100 tests) and `clipper selftest --live` (adds the 4 RTMP tests). Full run: 104 passed in 6m20s (Python 3.11, Linux, CPU).
 
 ## Python versions (CPU-only, no optional packages)
 3.10.20, 3.12.13, 3.13.13: unit suite 74/74 each (before one later test was added); integration + agents 24/24 on 3.10 and on 3.13. 3.11: the full 103.
