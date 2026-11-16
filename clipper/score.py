@@ -4,15 +4,15 @@ from . import boundaries as B
 from .signals import box
 from .util import percentile_rank
 
-# speech, visual, audio, chat, (hook is added after boundaries). Renormalised over the signals that exist.
+# speech, visual, audio, chat, events (PANNs), ocr; hook is added after boundaries. Renormalised over the signals that exist.
 PROFILES = {
-    "podcast":   {"speech": .45, "visual": .05, "audio": .20, "chat": .20, "layout": "fill"},
-    "interview": {"speech": .45, "visual": .05, "audio": .25, "chat": .15, "layout": "fill"},
-    "gaming":    {"speech": .20, "visual": .30, "audio": .25, "chat": .25, "layout": "fit"},
-    "irl":       {"speech": .30, "visual": .25, "audio": .20, "chat": .25, "layout": "fill"},
-    "comedy":    {"speech": .35, "visual": .10, "audio": .35, "chat": .20, "layout": "fill"},
-    "sports":    {"speech": .20, "visual": .25, "audio": .35, "chat": .20, "layout": "fit"},
-    "auto":      {"speech": .30, "visual": .20, "audio": .20, "chat": .20, "layout": "fill"},
+    "podcast":   {"speech": .40, "visual": .05, "audio": .15, "chat": .20, "events": .15, "ocr": .00, "layout": "fill"},
+    "interview": {"speech": .40, "visual": .05, "audio": .20, "chat": .15, "events": .10, "ocr": .00, "layout": "fill"},
+    "gaming":    {"speech": .15, "visual": .25, "audio": .20, "chat": .20, "events": .10, "ocr": .10, "layout": "fit"},
+    "irl":       {"speech": .25, "visual": .20, "audio": .15, "chat": .20, "events": .15, "ocr": .05, "layout": "fill"},
+    "comedy":    {"speech": .30, "visual": .05, "audio": .20, "chat": .15, "events": .30, "ocr": .00, "layout": "fill"},
+    "sports":    {"speech": .15, "visual": .20, "audio": .25, "chat": .15, "events": .10, "ocr": .15, "layout": "fit"},
+    "auto":      {"speech": .25, "visual": .15, "audio": .15, "chat": .20, "events": .15, "ocr": .10, "layout": "fill"},
 }
 HOOK_W = 0.10
 HOOK = re.compile(r"^(\W*)(why|how|what|nobody|never|everyone|the (best|worst|biggest)|i (can't|never|thought)|you (won't|have to)|this is|so\b|\d)", re.I)

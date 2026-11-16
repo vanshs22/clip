@@ -25,7 +25,7 @@ def get(a):
 
 def cmd_process(a):
     j = J.create(a.src, ROOT, clips=a.clips, profile=a.profile, mode=a.mode, style=a.style, model=a.model, chat=a.chat,
-                 max_calls=a.max_calls, max_tokens=a.max_tokens, cookies=a.cookies, transcript=a.transcript, draft=a.draft or None)
+                 max_calls=a.max_calls, max_tokens=a.max_tokens, cookies=a.cookies, transcript=a.transcript, upscale=a.upscale, draft=a.draft or None)
     if a.force_from:
         j.invalidate(a.force_from)
     nxt = J.run(j, a.stop_after)
@@ -51,7 +51,15 @@ def cmd_next(a):
     if not st:
         rep = jload(j.p("report.json"))
         bad = [c for c in rep["clips"] if not c["pass"]]
-        print(f"NEXT: {'fix ' + str([c['id'] for c in bad]) + ' (see issues in status), then render' if bad else 'clipper export ' + j.id}")
+        crit = {f.stem for f in j.p("review", "critics").glob("*.json")} if j.p("review", "critics").exists() else set()
+        if bad:
+            print(f"NEXT: fix {[c['id'] for c in bad]} (see issues in status), then render")
+        elif not crit:
+            print(f"NEXT: clipper polish {j.id}   (editor-critic: critique, fix, re-render, max 3 rounds)")
+        elif not crit & {"vision", "vision_unavailable"}:
+            print(f"NEXT: clipper critique {j.id} --packet   (open every sheet, then --submit, or --unavailable WHY)")
+        else:
+            print(f"NEXT: show the user the verdicts, then clipper export {j.id}")
         return
     what, tip = HELP[st]
     print(f"NEXT: {st}  ({what})\nrun : clipper process {j.opts['src']!r} --stop-after {st}\ntip : {tip}")
@@ -60,36 +68,13 @@ def cmd_next(a):
 def cmd_edit(a):
     """Structured edit ops on one clip; only that clip re-renders."""
     j = get(a)
-    plan, words = jload(j.p("plan.json")), jload(j.p("transcript.json"))["words"]
-    c = next((c for c in plan["clips"] if c["id"] == a.clip), None) or sys.exit("no such clip")
-    if a.start_shift or a.end_shift:
-        c["focus_auto"] = None  # shots changed
-    if a.start_shift:
-        c["final_start"] = round(max(0.0, c["final_start"] + a.start_shift), 3)
-    if a.end_shift:
-        c["final_end"] = round(c["final_end"] + a.end_shift, 3)
-    if a.captions:
-        c["caption"]["style"] = a.captions
-    if a.caption_scale:
-        c["caption"]["scale"] = a.caption_scale
-    if a.zoom is not None:
-        c["zoom"] = None if a.zoom <= 1 else a.zoom
+    ops = {k: v for k, v in dict(
+        start_shift=a.start_shift, end_shift=a.end_shift, captions=a.captions, caption_scale=a.caption_scale, zoom=a.zoom, layout=a.layout,
+        focus_x=a.focus_x, drop=a.drop or None, broll_dir=a.broll_dir, no_broll=a.no_broll or None, music=a.music, music_db=a.music_db,
+        audio=a.audio, upscale=a.upscale, zooms_clear=a.no_zooms or None).items() if v is not None}
     if a.zoom_at is not None:
-        c.setdefault("zooms", []).append({"t": a.zoom_at, "dur": a.zoom_for, "amt": a.zoom_amt})
-    if a.no_zooms:
-        c["zooms"] = []
-    if a.layout:
-        c["layout"] = a.layout
-    if a.focus_x is not None:
-        c["focus_x"] = a.focus_x
-    if a.drop:
-        c["dropped"] = True
-    ids = [i for i, w in enumerate(words) if w["s"] >= c["final_start"] - 0.05 and w["e"] <= c["final_end"] + 0.05]
-    if ids:
-        c["final_words"] = [ids[0], ids[-1]]
-        c["issues"] = B.validate(words, c)
-    jsave(j.p("plan.json"), plan)
-    j.invalidate("render")
+        ops["zoom_add"] = {"t": a.zoom_at, "dur": a.zoom_for, "amt": a.zoom_amt}
+    c = J.edit_clip(j, a.clip, ops)
     print(f"clip {a.clip}: {hms(c['final_start'])}-{hms(c['final_end'])} issues={c.get('issues')}  -> clipper render {j.id}")
 
 
@@ -124,8 +109,10 @@ def cmd_export(a):
 
 def cmd_monitor(a):
     from . import live
-    ch = a.channel or (a.src.rstrip("/").split("/")[-1] if "twitch.tv" in a.src else None)
-    live.monitor(a.src, a.out, ch, a.chat_file, a.latency, not a.no_record, max_seconds=a.max_seconds)
+    cs = live.chat_source(a.src, a.channel, a.chat_file)
+    if not cs:
+        print("no chat adapter for this source: audio (+ speech) spikes only. Twitch: automatic. YouTube: set YOUTUBE_API_KEY. Kick/others: --chat-file relay.jsonl")
+    live.monitor(a.src, a.out, cs, a.latency, not a.no_record, max_seconds=a.max_seconds, stt=not a.no_stt)
 
 
 def cmd_doctor(a):
@@ -137,7 +124,12 @@ def cmd_doctor(a):
         ff = None
     rows = [("ffmpeg", bool(ff), "install ffmpeg or `pip install imageio-ffmpeg`"),
             ("yt-dlp", bool(shutil.which("yt-dlp")), "pip install yt-dlp  (URL sources)"),
-            ("faster-whisper", has_mod("faster_whisper"), "pip install faster-whisper  (or pass --transcript)"),
+            ("faster-whisper", has_mod("faster_whisper"), "pip install faster-whisper  (or pass --transcript; also enables live speech)"),
+            ("panns-inference (sound events)", has_mod("panns_inference"), "pip install panns-inference  (optional: laughter/cheering signal)"),
+            ("ultralytics (people tracking)", has_mod("ultralytics"), "pip install ultralytics  (optional; else OpenCV faces)"),
+            ("rapidocr (on-screen text)", has_mod("rapidocr_onnxruntime"), "pip install rapidocr-onnxruntime  (optional)"),
+            ("Real-ESRGAN upscaler", bool(shutil.which("realesrgan-ncnn-vulkan")), "optional: realesrgan-ncnn-vulkan on PATH for low-res sources"),
+            ("YOUTUBE_API_KEY (live chat)", bool(os.environ.get("YOUTUBE_API_KEY")), "optional: your own free YouTube Data API key"),
             ("opencv (face focus)", has_mod("cv2"), "pip install opencv-python-headless  (optional; else centre crop)"),
             ("streamlink", bool(shutil.which("streamlink")), "pip install streamlink  (optional; yt-dlp -g is the fallback)"),
             ("nvidia GPU", bool(shutil.which("nvidia-smi")), "optional; CPU uses int8 small model"),
@@ -147,6 +139,68 @@ def cmd_doctor(a):
     if ff:
         enc = R.encoder()
         print(f"     encoder: {enc}")
+
+
+def show_critique(j):
+    from . import critics as C
+    for n, r in C.load_reports(j).items():
+        for cid, cl in r["clips"].items():
+            for f in cl["findings"]:
+                print(f"{f['severity'].upper():7} clip {cid} {n}/{f['code']}" + (f" @{f['timestamp_sec']}s" if f.get("timestamp_sec") is not None else "") +
+                      f"\n        {f['problem']}\n        evidence: {f['evidence']}\n        expected: {f['expected']}\n        editor: {f['editor_note']}\n"
+                      f"        fix [{f['fix_target']}]: {C.edit_cli(j.id, f) or f['fix']}")
+        if r.get("assessment") == "NOT PERFORMED":
+            print(f"NOT PERFORMED  vision critic: {r['reason']}")
+    print("--- editor's verdict (Murch-weighted over what was assessed)")
+    for cid, v in C.summarize(j).items():
+        print(f"clip {cid}: {v['verdict'].upper():6} {v['overall']}/100  assessed={v['assessed']}" + (f"  NOT ASSESSED: {v['unassessed']}" if v["unassessed"] else ""))
+
+
+def cmd_critique(a):
+    from . import critics as C
+    j = get(a)
+    if not j.done("render"):
+        sys.exit("render first: clipper render JOB (critics read the real files)")
+    if a.packet:
+        imgs = C.vision_packet(j)
+        print(f"open every image, then fill {j.p('review', 'findings.template.json')} and run: clipper critique {j.id} --submit FILE\nread {j.p('review', 'packet.md')}\n" + "\n".join(imgs))
+    elif a.submit:
+        C.vision_submit(j, a.submit)
+        show_critique(j)
+    elif a.unavailable:
+        C.vision_unavailable(j, a.unavailable)
+        print("recorded: vision checks were NOT performed")
+    else:
+        C.run_critics(j, a.names or None)
+        show_critique(j)
+
+
+def cmd_fix(a):
+    from . import critics as C
+    j = get(a)
+    done, esc = C.apply_fixes(j)
+    print("\n".join(["applied:"] + done) if done else "nothing mechanical to apply")
+    if esc:
+        print("needs a human/agent decision:\n  " + "\n  ".join(esc))
+    if done:
+        print(f"next: clipper render {j.id}  then  clipper critique {j.id}")
+
+
+def cmd_polish(a):
+    """critique -> auto-fix -> re-render, max 3 rounds; then hand the rest to the user."""
+    from . import critics as C
+    j = get(a)
+    for r in range(1, C.MAX_ROUNDS + 1):
+        J.run(j, "qc", log=lambda *_: None)
+        C.run_critics(j)
+        done, esc = C.apply_fixes(j)
+        print(f"round {r}: applied {len(done)}" + "".join(f"\n  {d}" for d in done))
+        if not done:
+            break
+    J.run(j, "qc", log=lambda *_: None)
+    C.run_critics(j)
+    show_critique(j)
+    print(f"\nIf findings remain after {C.MAX_ROUNDS} rounds, show them to the user. Eyes still needed: clipper critique {j.id} --packet")
 
 
 def cmd_bench(a):
@@ -184,6 +238,7 @@ def main(argv=None):
     s.add_argument("--chat"), s.add_argument("--cookies"), s.add_argument("--transcript")
     s.add_argument("--draft", action="store_true"), s.add_argument("--stop-after", default="qc", choices=J.STAGES)
     s.add_argument("--force-from", choices=J.STAGES)
+    s.add_argument("--upscale", choices=["auto", "off"], help="auto: Real-ESRGAN for low-res sources if installed")
     s.add_argument("--max-calls", type=int), s.add_argument("--max-tokens", type=int)
     s.set_defaults(f=cmd_process)
     for n, f in (("status", cmd_status), ("next", cmd_next)):
@@ -197,6 +252,9 @@ def main(argv=None):
     s.add_argument("--zoom-at", type=float, help="punch-in at clip-relative seconds (use on a named punchline)")
     s.add_argument("--zoom-for", type=float, default=2.0), s.add_argument("--zoom-amt", type=float, default=1.12)
     s.add_argument("--no-zooms", action="store_true")
+    s.add_argument("--broll-dir", help="folder of images/videos named after spoken keywords (pizza.png)"), s.add_argument("--no-broll", action="store_true")
+    s.add_argument("--music", help="your own royalty-cleared track; ducked under speech"), s.add_argument("--music-db", type=float, default=-22.0)
+    s.add_argument("--audio", choices=["clean", "raw"], help="clean = high-pass + denoise"), s.add_argument("--upscale", choices=["auto", "off"])
     s.set_defaults(f=cmd_edit)
     s = sp.add_parser("render")
     s.add_argument("job"), s.add_argument("--draft", action=argparse.BooleanOptionalAction, default=None)
@@ -207,8 +265,14 @@ def main(argv=None):
     s = sp.add_parser("monitor", help="watch a live stream, record it, emit preliminary clips")
     s.add_argument("src"), s.add_argument("--out", default="live-out"), s.add_argument("--channel"), s.add_argument("--chat-file")
     s.add_argument("--latency", type=float, default=8.0, help="chat-vs-video delay in seconds"), s.add_argument("--no-record", action="store_true")
-    s.add_argument("--max-seconds", type=float)
+    s.add_argument("--max-seconds", type=float), s.add_argument("--no-stt", action="store_true", help="skip live speech transcription")
     s.set_defaults(f=cmd_monitor)
+    s = sp.add_parser("critique", help="editor-critic review of the real files (auto critics, or --packet/--submit/--unavailable for the vision critic)")
+    s.add_argument("job"), s.add_argument("names", nargs="*", help="cut story pace captions framing frames audio"), s.add_argument("--packet", action="store_true")
+    s.add_argument("--submit"), s.add_argument("--unavailable", metavar="WHY")
+    s.set_defaults(f=cmd_critique)
+    sp.add_parser("fix", help="apply the critics' mechanical edits (once per clip+issue)").add_argument("job"), sp.choices["fix"].set_defaults(f=cmd_fix)
+    sp.add_parser("polish", help="critique -> fix -> re-render, max 3 rounds").add_argument("job"), sp.choices["polish"].set_defaults(f=cmd_polish)
     s = sp.add_parser("bench", help="score selection/boundaries against reviewed reference timestamps")
     s.add_argument("golden"), s.add_argument("--clips", type=int)
     s.set_defaults(f=cmd_bench)

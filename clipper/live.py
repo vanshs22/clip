@@ -1,9 +1,9 @@
 """Live monitor: rolling segment buffer + full recording, chat/audio spike detection, preliminary clips.
 Final selection happens AFTER the stream: `clipper process record.ts --chat chat.jsonl` reuses everything here.
 v1 live signals: chat (Twitch IRC, or tail --chat-file) + audio level. Live speech/vision run post-stream."""
-import json, os, re, shutil, socket, ssl, threading, time
+import datetime, importlib.util, json, os, re, shutil, socket, ssl, threading, time, urllib.parse, urllib.request
 from pathlib import Path
-from .signals import SpikeDetector
+from .signals import SpikeDetector, word_score
 from .util import ffmpeg, run, hms
 import subprocess
 
@@ -47,6 +47,109 @@ def twitch_chat(channel, sink, stop):
                 sink(time.time(), m[1], m[2])
 
 
+def parse_chat_line(line):
+    """One line of a relay file -> (wall_epoch, user, text) or None. {"u","m"} plus optional {"ts": epoch}. Any tool can write this
+    (e.g. your own Kick webhook receiver)."""
+    try:
+        j = json.loads(line)
+        return float(j.get("ts") or time.time()), j.get("u"), str(j.get("m", ""))
+    except (ValueError, AttributeError):
+        return None
+
+
+def tail_chat(path, sink, stop):
+    Path(path).touch()
+    with open(path) as f:
+        f.seek(0, 2)
+        while not stop.is_set():
+            ln = f.readline()
+            if not ln:
+                time.sleep(0.5)
+            elif m := parse_chat_line(ln):
+                sink(*m)
+
+
+def _get_json(url):
+    with urllib.request.urlopen(url, timeout=20) as r:
+        return json.load(r)
+
+
+def youtube_chat(src, sink, stop, key, fetch=_get_json):
+    """Official YouTube Data API v3 liveChatMessages.list with YOUR API key (public chats need no OAuth). Respects pollingIntervalMillis;
+    quota applies. `fetch` is injectable for tests."""
+    m = re.search(r"(?:v=|youtu\.be/|/live/)([\w-]{11})", src)
+    if not m:
+        raise SystemExit("cannot find a YouTube video id in the URL")
+    q = urllib.parse.urlencode
+    d = fetch("https://www.googleapis.com/youtube/v3/videos?" + q({"part": "liveStreamingDetails", "id": m[1], "key": key}))
+    try:
+        chat_id = d["items"][0]["liveStreamingDetails"]["activeLiveChatId"]
+    except (KeyError, IndexError):
+        raise SystemExit("this video has no active live chat")
+    page = None
+    while not stop.is_set():
+        r = fetch("https://www.googleapis.com/youtube/v3/liveChat/messages?" + q({"liveChatId": chat_id, "part": "snippet,authorDetails", "key": key, **({"pageToken": page} if page else {})}))
+        for it in r.get("items", []):
+            ts = datetime.datetime.fromisoformat(it["snippet"]["publishedAt"].replace("Z", "+00:00")).timestamp()
+            sink(ts, it["authorDetails"].get("displayName"), it["snippet"].get("displayMessage", ""))
+        page = r.get("nextPageToken")
+        stop.wait(max(2.0, r.get("pollingIntervalMillis", 5000) / 1000))
+        if not r.get("items") and not page:
+            return
+
+
+def chat_source(src, channel=None, chat_file=None):
+    """Pick the chat adapter: relay file > Twitch IRC > YouTube API (needs YOUTUBE_API_KEY). Kick: no stable public read API without an
+    OAuth app + public webhook, so relay its messages into a jsonl file and pass --chat-file."""
+    if chat_file:
+        return lambda sink, stop: tail_chat(chat_file, sink, stop)
+    if channel or "twitch.tv" in src:
+        ch = channel or src.rstrip("/").split("/")[-1]
+        return lambda sink, stop: twitch_chat(ch, sink, stop)
+    if re.search(r"youtube\.com|youtu\.be", src) and os.environ.get("YOUTUBE_API_KEY"):
+        return lambda sink, stop: youtube_chat(src, sink, stop, os.environ["YOUTUBE_API_KEY"])
+    return None
+
+
+class LiveTranscriber:
+    """Transcribes the newest buffer segments every `every` seconds. Words get stream PTS. Overlap is re-read but never re-emitted.
+    `fn(wav_path) -> [{"w","s","e"}]` (times relative to the wav); default is faster-whisper small + VAD."""
+
+    def __init__(self, buf, fn=None, every=32, log=None):
+        self.buf, self.fn, self.every, self.last_end, self.next_seg, self.model = Path(buf), fn, every, 0.0, 0, None
+        self.log = log
+
+    def _fn(self, wav):
+        if self.model is None:
+            from faster_whisper import WhisperModel
+            self.model = WhisperModel("small", device="cuda" if shutil.which("nvidia-smi") else "cpu", compute_type="float16" if shutil.which("nvidia-smi") else "int8")
+        segs, _ = self.model.transcribe(str(wav), word_timestamps=True, vad_filter=True)
+        return [{"w": w.word.strip(), "s": w.start, "e": w.end} for s in segs for w in (s.words or []) if w.word.strip()]
+
+    def poll(self, done_segs):
+        """done_segs: sorted names of completed segments. Returns new words with absolute stream times."""
+        idx = [int(n[4:10]) for n in done_segs]
+        if not idx or (idx[-1] + 1 - self.next_seg) * SEG < self.every:
+            return []
+        first = max(self.next_seg - 1, idx[0], 0)  # one segment of overlap so a word on a boundary is not lost
+        names = [n for n in done_segs if first <= int(n[4:10]) <= idx[-1]]
+        lst, wav = self.buf / "stt.txt", self.buf / "stt.wav"
+        lst.write_text("".join(f"file '{n}'\n" for n in names))
+        r = run([ffmpeg(), "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", lst, "-vn", "-ac", "1", "-ar", "16000", wav], cwd=self.buf)
+        self.next_seg = idx[-1] + 1
+        if r.returncode:
+            return []
+        off = int(names[0][4:10]) * SEG
+        new = []
+        for w in (self.fn or self._fn)(wav):
+            s, e = off + w["s"], off + w["e"]
+            if s >= self.last_end - 0.05:
+                new.append({"w": w["w"], "s": round(s, 2), "e": round(e, 2)})
+        if new:
+            self.last_end = new[-1]["e"]
+        return new
+
+
 def stream_url(src):
     if os.path.exists(src) or src.startswith(("rtmp", "http")) and ".m3u8" in src:
         return src
@@ -73,7 +176,7 @@ def extract(buf_dir, seg_names, start_idx, end_idx, a, b, out):
     return out if r.returncode == 0 else None
 
 
-def monitor(src, out_dir, channel=None, chat_file=None, latency=8.0, record=True, log=print, max_seconds=None):
+def monitor(src, out_dir, chat_src=None, latency=8.0, record=True, log=print, max_seconds=None, stt=True):
     out = Path(out_dir)
     buf = out / "buffer"
     shutil.rmtree(buf, ignore_errors=True)
@@ -91,9 +194,13 @@ def monitor(src, out_dir, channel=None, chat_file=None, latency=8.0, record=True
         chat_t.append(t)
         chat_f.write(json.dumps({"t": round(t, 2), "u": user, "m": text}) + "\n")
         chat_f.flush()
-    if channel:
-        threading.Thread(target=twitch_chat, args=(channel, sink, stop), daemon=True).start()
+    if chat_src:
+        threading.Thread(target=chat_src, args=(sink, stop), daemon=True).start()
     chat_det, aud_det, seen, bin_i = SpikeDetector(60, 6.0, 8), SpikeDetector(60, 4.0, 1), set(), 0
+    lt = LiveTranscriber(buf) if stt and importlib.util.find_spec("faster_whisper") else None
+    sp_det, spbin, sp_f = SpikeDetector(60, 5.0, 3), {}, open(out / "live-transcript.jsonl", "a")
+    if stt and not lt:
+        log("live speech: faster-whisper not installed, skipping (chat + audio only)")
     try:
         while proc.poll() is None and (max_seconds is None or time.time() - t0 < max_seconds):
             time.sleep(2)
@@ -107,11 +214,17 @@ def monitor(src, out_dir, channel=None, chat_file=None, latency=8.0, record=True
                 lv = [float(x) for x in re.findall(r"RMS_level=(-?[\d.]+)", r.stdout)]
                 if lv and aud_det.feed(max(lv[-1], -90) + 90):
                     events.append({"pts": i * SEG, "kind": "audio", "x": lv[-1]})
+            for w in (lt.poll(sorted(seen)) if lt else []):  # words are scored as they arrive; speech spikes join chat/audio events
+                spbin[int(w["s"] // BIN)] = spbin.get(int(w["s"] // BIN), 0.0) + word_score(w)
+                sp_f.write(json.dumps(w) + "\n")
+            sp_f.flush()
             now = (len(seen)) * SEG
             while (bin_i + 1) * BIN <= now:  # complete chat bins
                 c = sum(1 for t in chat_t if bin_i * BIN <= t < (bin_i + 1) * BIN)
                 if chat_det.feed(c):
                     events.append({"pts": bin_i * BIN, "kind": "chat", "x": c})
+                if lt and sp_det.feed(spbin.pop(bin_i, 0.0)):
+                    events.append({"pts": bin_i * BIN, "kind": "speech", "x": 0})
                 bin_i += 1
             for w in merge_events(events):
                 key = round(w["start"])
@@ -127,4 +240,5 @@ def monitor(src, out_dir, channel=None, chat_file=None, latency=8.0, record=True
         stop.set()
         proc.terminate()
         chat_f.close()
+        sp_f.close()
     log(f"stopped. Next: clipper process {out / 'record.ts'} --chat {out / 'chat.jsonl'}")

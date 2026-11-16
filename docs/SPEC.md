@@ -34,11 +34,20 @@ Chat spikes use rolling median + 6 x MAD, so there is no fixed threshold.
 ### Phase 1 (done)
 Scene-aware per-shot crop (never animates across a cut), motivated punch-in zoom (max one automatic), lanczos+sharpen and `low_res_source` warning, persistent SQLite task queue, MCP (stdio) and HTTP (localhost, token, Host check, argument validation) wrappers, `bench` golden-set scorer. Earlier: ingest, chunked resumable Whisper, signal fusion, boundary engine, LLM judge with budget/cache, 4 caption presets, fill/fit layouts, loudness, QC, edit ops, live buffer + Twitch chat/audio spikes.
 
-### Phase 2 (not started; needs models, a GPU or live platform access to verify)
-1. Live Whisper on the rolling buffer; feed speech spikes into `live.monitor`.
-2. YouTube live chat and Kick chat adapters (Twitch exists).
-3. Extra signal series in `signals.py`: PANNs audio events, YOLOv8 pose/face, RapidOCR on-screen text.
-4. TalkNet active speaker; multi-speaker split layouts; smooth in-shot face tracking in `render.vfilter`.
-5. AI upscaling (Real-ESRGAN/Video2X) when `low_res_source`; today only lanczos+sharpen.
-6. Optional B-roll, user-supplied music, audio cleanup.
-7. A real golden set (podcast, gaming, interview, comedy, sports) with reviewed timestamps for `clipper bench`.
+### Phase 2 (done, with honest verification status)
+| item | status | verified here |
+|---|---|---|
+| Editor-critic (cut, story, pace, captions, framing, frames, audio, vision; Murch-weighted verdict; `critique` / `fix` / `polish`) | built | yes, on bad fixtures and real renders |
+| Live Whisper on the rolling buffer (speech spikes join chat/audio events) | built | plumbing with a stand-in model; real faster-whisper on a live stream: no |
+| YouTube live chat (official Data API v3, your own API key, public chats need no OAuth) | built | with a fake API; real key: no |
+| Chat relay file (`--chat-file`) for Kick or anything else | built | yes |
+| PANNs sound events, RapidOCR on-screen text, motion series | built | motion: yes. PANNs/RapidOCR: scoring helpers only, models not downloaded here |
+| YOLO/Haar people tracking: per-shot, smoothed, in-shot glide, never across a cut | built | maths + ffmpeg expressions yes; detectors no |
+| Two-person split layout (both always visible) | built | render yes; detection no |
+| AI upscaling via Real-ESRGAN ncnn-vulkan for low-res sources | built | plumbing with a stand-in binary; real binary/GPU: no |
+| B-roll by keyword, ducked user music, audio cleanup | built | yes |
+| Golden-set benchmark | scorer yes; no real videos shipped (you supply them: `clipper bench`) | scorer yes |
+
+Not done, on purpose: TalkNet active-speaker following (needs model weights I cannot validate; the split layout keeps both people visible instead), a Kick chat *reader* (Kick's official API delivers chat by webhook to an OAuth app with a public URL; relay it into `--chat-file`), Video2X, RIFE, MediaMTX ingest.
+
+Golden file format: `{"entries":[{"video":"a.mp4","transcript":"a.json","profile":"podcast","refs":[{"start":120,"end":151}]}]}`.

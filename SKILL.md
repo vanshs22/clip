@@ -27,10 +27,11 @@ Tell the user plainly what `doctor` reports missing. Do not work around it silen
 ## Workflow
 1. `process ... --stop-after select`: download, transcribe, detect, rank. Writes `plan.json`.
 2. `clipper status JOB`: show the user each clip (time, title, text, issues, LLM cost). One question: keep / change / drop?
-3. Edits (only that clip re-renders): `clipper edit JOB 3 --start-shift -3`, `--end-shift 2`, `--captions karaoke`, `--caption-scale 0.8`, `--zoom-at 12.5 --zoom-for 2 --zoom-amt 1.12` (punch-in on a named punchline; `--no-zooms` clears), `--zoom 1.15` (whole clip), `--layout fit`, `--focus-x 0.3`, `--drop`.
+3. Edits (only that clip re-renders): `clipper edit JOB 3 --start-shift -3`, `--end-shift 2`, `--captions karaoke`, `--caption-scale 0.8`, `--zoom-at 12.5 --zoom-for 2 --zoom-amt 1.12` (punch-in on a named punchline; `--no-zooms` clears), `--zoom 1.15` (whole clip), `--layout fit`, `--focus-x 0.3`, `--broll-dir DIR` (files named after spoken keywords), `--music FILE --music-db -22` (your own track, ducked under speech), `--audio clean`, `--upscale off`, `--drop`.
 4. `clipper render JOB --draft` (540x960 quick look), then `clipper render JOB --no-draft`.
-5. Every clip must show `OK`. A `FIX` lists issue codes: see `docs/SPEC.md` section QC for the fix for each. Max 3 fix rounds, then tell the user what is left.
-6. `clipper export JOB --out DIR`: mp4 + `metadata.json` (titles, times, cost).
+5. `clipper polish JOB`: the editor-critic reviews the real renders, applies mechanical fixes once, re-renders (max 3 rounds). Then do the vision pass: `clipper critique JOB --packet`, OPEN every sheet, submit findings (see `skills/editor-critic/SKILL.md`). Anything left goes to the user with the critic's wording.
+6. Every clip must show `OK` in QC. A `FIX` lists issue codes: see `docs/SPEC.md` section QC for the fix for each. Max 3 fix rounds, then tell the user what is left.
+7. `clipper export JOB --out DIR`: mp4 + `metadata.json` (titles, times, cost).
 
 ## Rules
 - Boundaries: completeness beats length. The LLM returns word indices; timestamps come from real word timings. Never hand-pick timestamps except via `--start-shift/--end-shift`.
@@ -41,5 +42,5 @@ Tell the user plainly what `doctor` reports missing. Do not work around it silen
 - Reframing is per shot: the crop can change only at a scene cut. The plan may hold ONE auto punch-in on a strong clip; it is dropped if a cut is near. A `low_res_source` warning means the source is too small for clean 1080x1920: tell the user, do not hide it.
 - Other agents: `clipper mcp` (MCP stdio: clip_video, get_job_status, get_clip_candidates, edit_clip, render_clips, export_clips, monitor_livestream, get_task) or `clipper serve` (HTTP on 127.0.0.1, bearer token printed at start). Slow tools return a task id; poll `get_task`.
 - Measure changes with `clipper bench golden.json` (recall, boundary error, issue rate against reviewed timestamps).
-- Not implemented yet (say so if asked): phase 2 in `docs/SPEC.md` (live Whisper, YouTube/Kick live chat, PANNs/YOLO/TalkNet/OCR, AI upscaling, multi-speaker layouts, B-roll/music).
-- Append lessons to `memory/learnings.md` after each job.
+- Live: `clipper monitor` uses Twitch chat automatically, YouTube chat with your own `YOUTUBE_API_KEY`, anything else (Kick) via `--chat-file relay.jsonl`; live speech transcription runs if faster-whisper is installed.
+- Not implemented (say so if asked): TalkNet active-speaker following (two steady people get a stacked split layout showing both), a Kick chat reader, Video2X/RIFE. Unverified without model weights or a GPU: PANNs, YOLO, RapidOCR, Real-ESRGAN, live Whisper on a real stream. See `docs/SPEC.md`.

@@ -9,7 +9,7 @@ STAGES = ["ingest", "transcribe", "signals", "candidates", "select", "render", "
 ART = {"ingest": "source.json", "transcribe": "transcript.json", "signals": "signals.json", "candidates": "candidates.json",
        "select": "plan.json", "render": "render.json", "qc": "report.json"}
 DEFAULTS = {"clips": 10, "profile": "auto", "mode": "smart", "style": "bold_pop", "model": "balanced", "chat": None,
-            "cookies": None, "transcript": None, "draft": False, "max_calls": 6, "max_tokens": 60000}
+            "cookies": None, "transcript": None, "draft": False, "upscale": "auto", "max_calls": 6, "max_tokens": 60000}
 
 
 class Job:
@@ -62,6 +62,54 @@ def run(j, stop_after="qc", log=print):
     return next_step(j)
 
 
+EDIT_KEYS = {"start_shift", "end_shift", "captions", "caption_scale", "zoom", "layout", "focus_x", "drop", "broll_dir", "no_broll", "music",
+             "music_db", "audio", "upscale", "zooms_clear", "zoom_add"}
+
+
+def edit_clip(j, cid, ops):
+    """The single place clips are modified (CLI, MCP and critic auto-fixes all come here). Invalidates only the render."""
+    from . import boundaries as B, extras
+    bad = set(ops) - EDIT_KEYS
+    if bad:
+        raise SystemExit(f"unknown edit op(s): {sorted(bad)}")
+    plan, words = jload(j.p("plan.json")), jload(j.p("transcript.json"))["words"]
+    c = next((c for c in plan["clips"] if c["id"] == cid), None)
+    if c is None:
+        raise SystemExit(f"no such clip {cid}")
+    if ops.get("start_shift") or ops.get("end_shift"):
+        c["focus_auto"] = None  # shots changed
+        c["final_start"] = round(max(0.0, c["final_start"] + ops.get("start_shift", 0)), 3)
+        c["final_end"] = round(c["final_end"] + ops.get("end_shift", 0), 3)
+    if "captions" in ops:
+        c["caption"]["style"] = ops["captions"]
+    if "caption_scale" in ops:
+        c["caption"]["scale"] = ops["caption_scale"]
+    if "zoom" in ops:
+        c["zoom"] = None if ops["zoom"] <= 1 else ops["zoom"]
+    if "zoom_add" in ops:
+        c.setdefault("zooms", []).append(ops["zoom_add"])
+    if ops.get("zooms_clear"):
+        c["zooms"] = []
+    for k in ("layout", "focus_x", "audio", "upscale"):
+        if k in ops:
+            c[k] = ops[k]
+    if "broll_dir" in ops:
+        c["broll"] = extras.match_broll(words, ops["broll_dir"], c["final_start"], c["final_end"])
+    if ops.get("no_broll"):
+        c["broll"] = []
+    if ops.get("music"):
+        c["music"] = {"file": str(Path(ops["music"]).resolve()), "db": ops.get("music_db", -22.0)}
+    if ops.get("drop"):
+        c["dropped"] = True
+    ids = [i for i, w in enumerate(words) if w["s"] >= c["final_start"] - 0.05 and w["e"] <= c["final_end"] + 0.05]
+    if ids:
+        c["final_words"] = [ids[0], ids[-1]]
+        c["issues"] = B.validate(words, c)
+    jsave(j.p("plan.json"), plan)
+    j.invalidate("render")
+    return c
+
+
 # ---- stages -------------------------------------------------------------------------------------------------
 def _ingest(j, o):
     meta = ingest.inspect(o["src"], o["cookies"])
@@ -93,14 +141,17 @@ def _signals(j, o):
     d = src["info"]["duration"]
     chat = ingest.load_chat(src["chat"]) if src.get("chat") else []
     audio = [x + 90 for x in S.audio_rms(src["path"], d)] if src["info"]["audio"] else []
-    visual, cuts = S.scene_density(src["path"], d) if src["info"]["width"] else ([], [])
-    sig = {"speech": S.text_series(words, d), "audio": audio, "visual": visual, "chat": S.chat_series(chat, d) if chat else []}
+    vid = bool(src["info"]["width"])
+    cutd, cuts = S.scene_density(src["path"], d) if vid else ([], [])
+    visual = S.fuse_visual(S.motion_series(src["path"], d), cutd) if vid else []
+    sig = {"speech": S.text_series(words, d), "audio": audio, "visual": visual, "chat": S.chat_series(chat, d) if chat else [],
+           "events": S.audio_events(src["path"], d) if src["info"]["audio"] else [], "ocr": S.ocr_series(src["path"], d) if vid else []}
     jsave(j.p("signals.json"), {**sig, "cuts": cuts, "chat_spikes": S.spikes(sig["chat"], min_abs=8) if chat else [], "chat_n": len(chat)})
 
 
 def _candidates(j, o):
     src, words, sig = jload(j.p("source.json")), jload(j.p("transcript.json"))["words"], jload(j.p("signals.json"))
-    cs = score.candidates(words, src["info"]["duration"], {k: sig[k] for k in ("speech", "audio", "visual", "chat")}, o["profile"])
+    cs = score.candidates(words, src["info"]["duration"], {k: sig.get(k, []) for k in ("speech", "audio", "visual", "chat", "events", "ocr")}, o["profile"])
     jsave(j.p("candidates.json"), {"candidates": cs})
 
 
@@ -108,7 +159,7 @@ def _select(j, o):
     words, cs = jload(j.p("transcript.json"))["words"], jload(j.p("candidates.json"))["candidates"]
     top, cost = llm.select(words, cs, o["clips"], o["mode"], j.p("cache", "llm"), llm.Budget(o["max_calls"], o["max_tokens"]))
     layout = score.PROFILES.get(o["profile"], score.PROFILES["auto"])["layout"]
-    clips = [{**c, "id": i + 1, "caption": {"style": o["style"], "scale": 1.0}, "layout": layout, "zoom": None, "focus_x": None,
+    clips = [{**c, "id": i + 1, "caption": {"style": o["style"], "scale": 1.0}, "layout": layout, "zoom": None, "focus_x": None, "upscale": o["upscale"],
               "zooms": auto_zoom(c, layout)} for i, c in enumerate(top)]
     jsave(j.p("plan.json"), {"clips": clips, "cost": cost})
 
