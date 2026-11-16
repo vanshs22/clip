@@ -1,0 +1,75 @@
+{
+ "_comment": "sha256 = checksum of the exact file validated in this project (trust-on-first-use against the upstream URL at the time). Verify licences before redistributing models.",
+ "yunet.onnx": {
+  "url": "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+  "sha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
+  "size": 232589,
+  "license": "MIT (OpenCV Zoo)",
+  "version": "2023mar",
+  "dest": "yunet.onnx",
+  "needed_for": "face detection / speaker following / framing"
+ },
+ "panns_cnn14": {
+  "url": "https://zenodo.org/record/3987831/files/Cnn14_mAP%3D0.431.pth?download=1",
+  "sha256": "0dc499e40e9761ef5ea061ffc77697697f277f6a960894903df3ada000e34b31",
+  "size": 327428481,
+  "license": "see Zenodo record 3987831 (PANNs, Kong et al.)",
+  "version": "Cnn14_mAP=0.431",
+  "dest": "@panns/Cnn14_mAP=0.431.pth",
+  "needed_for": "laughter/applause/cheering sound events"
+ },
+ "panns_labels": {
+  "url": "http://storage.googleapis.com/us_audioset/youtube_corpus/v1/csv/class_labels_indices.csv",
+  "sha256": "cdd1049833c4b86127c2773ac0d14a2754b6a6d0d1798002ed5c66e699708429",
+  "size": 14675,
+  "license": "CC BY 4.0 (AudioSet ontology)",
+  "version": "audioset-v1",
+  "dest": "@panns/class_labels_indices.csv",
+  "needed_for": "sound-event labels"
+ },
+ "ecapa/hyperparams.yaml": {
+  "url": "https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb/resolve/main/hyperparams.yaml",
+  "sha256": "6f78854fa04ba59e761437b76a2575d3aba5e5016de3e9b69f0c9a5077fb1a41",
+  "size": 1919,
+  "license": "Apache-2.0 (SpeechBrain ECAPA, VoxCeleb)",
+  "version": "main@validated",
+  "dest": "ecapa/hyperparams.yaml",
+  "needed_for": "who-is-speaking voice clustering"
+ },
+ "ecapa/embedding_model.ckpt": {
+  "url": "https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb/resolve/main/embedding_model.ckpt",
+  "sha256": "0575cb64845e6b9a10db9bcb74d5ac32b326b8dc90352671d345e2ee3d0126a2",
+  "size": 83316686,
+  "license": "Apache-2.0 (SpeechBrain ECAPA, VoxCeleb)",
+  "version": "main@validated",
+  "dest": "ecapa/embedding_model.ckpt",
+  "needed_for": "who-is-speaking voice clustering"
+ },
+ "ecapa/mean_var_norm_emb.ckpt": {
+  "url": "https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb/resolve/main/mean_var_norm_emb.ckpt",
+  "sha256": "cd70225b05b37be64fc5a95e24395d804231d43f74b2e1e5a513db7b69b34c33",
+  "size": 1921,
+  "license": "Apache-2.0 (SpeechBrain ECAPA, VoxCeleb)",
+  "version": "main@validated",
+  "dest": "ecapa/mean_var_norm_emb.ckpt",
+  "needed_for": "who-is-speaking voice clustering"
+ },
+ "ecapa/classifier.ckpt": {
+  "url": "https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb/resolve/main/classifier.ckpt",
+  "sha256": "fd9e3634fe68bd0a427c95e354c0c677374f62b3f434e45b78599950d860d535",
+  "size": 5534328,
+  "license": "Apache-2.0 (SpeechBrain ECAPA, VoxCeleb)",
+  "version": "main@validated",
+  "dest": "ecapa/classifier.ckpt",
+  "needed_for": "who-is-speaking voice clustering"
+ },
+ "ecapa/label_encoder.ckpt": {
+  "url": "https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb/resolve/main/label_encoder.ckpt",
+  "sha256": "e13c3a167bb4112685670ee896d20e2b565af16b3a4ceeaa8689fa4d22adb8b9",
+  "size": 128619,
+  "license": "Apache-2.0 (SpeechBrain ECAPA, VoxCeleb)",
+  "version": "main@validated",
+  "dest": "ecapa/label_encoder.ckpt",
+  "needed_for": "who-is-speaking voice clustering"
+ }
+}

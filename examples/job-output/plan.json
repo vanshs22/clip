@@ -1,0 +1,211 @@
+{
+ "clips": [
+  {
+   "core_words": [
+    48,
+    115
+   ],
+   "final_words": [
+    24,
+    133
+   ],
+   "core_start": 19.1,
+   "core_end": 39.14,
+   "final_start": 9.13,
+   "final_end": 43.68,
+   "text": "It's a great character piece into basically when Wally was changing. This is when Wally, so I guess the question is, when you started writing The Flash, did you have an outline from the very beginning, I want to take Wally from where he is now, which was still kind of a self -absorbed guy, and obviously he wasn't as fast as he was. Two, you wanted to make him into the hero that you knew he could be. So you had a plan from the beginning? Not really, because it was my first regular assignment of any import whatsoever.",
+   "issues": [],
+   "boundary_quality": 1.0,
+   "score": 0.7312,
+   "hook": 0.2,
+   "peak": 29,
+   "signals": {
+    "speech": 0.83,
+    "audio": 0.88,
+    "visual": 0.36,
+    "events": 0.75,
+    "ocr": 0.13
+   },
+   "final_score": 0.7312,
+   "id": 1,
+   "caption": {
+    "style": null,
+    "scale": 0.9
+   },
+   "layout": "fill",
+   "zoom": null,
+   "focus_x": null,
+   "upscale": "auto",
+   "zooms": [
+    {
+     "t": 19.37,
+     "dur": 2.0,
+     "amt": 1.12
+    }
+   ],
+   "captions_n": 110,
+   "captions_overflow": 0,
+   "focus_auto": [
+    [
+     [
+      0.0,
+      0.307
+     ],
+     [
+      0.87,
+      0.307
+     ],
+     [
+      27.87,
+      0.307
+     ],
+     [
+      28.17,
+      0.675
+     ]
+    ]
+   ],
+   "split_auto": null,
+   "warn": [
+    "low_res_source"
+   ]
+  },
+  {
+   "core_words": [
+    376,
+    439
+   ],
+   "final_words": [
+    375,
+    448
+   ],
+   "core_start": 120.1,
+   "core_end": 139.92,
+   "final_start": 119.58,
+   "final_end": 144.32,
+   "text": "Sure, sure. That made him realize at the end of that story, alright, I am my own man. I have matured, I have grown into the role. Yeah, that's great. Thank you. And so then what do you, personally, and maybe you have to be diplomatic, how do you feel about the return of Barry Allen? Not the comic that you wrote, that was great, but the actual rebirth of Barry in the universe.",
+   "issues": [],
+   "boundary_quality": 1.0,
+   "score": 0.6824,
+   "hook": 0.0,
+   "peak": 130,
+   "signals": {
+    "speech": 0.78,
+    "audio": 0.44,
+    "visual": 0.85,
+    "events": 0.99,
+    "ocr": 0.1
+   },
+   "final_score": 0.6824,
+   "id": 2,
+   "caption": {
+    "style": null,
+    "scale": 0.9
+   },
+   "layout": "fill",
+   "zoom": null,
+   "focus_x": null,
+   "upscale": "auto",
+   "zooms": [],
+   "captions_n": 74,
+   "captions_overflow": 0,
+   "focus_auto": [
+    [
+     [
+      0.0,
+      0.67
+     ],
+     [
+      0.42,
+      0.67
+     ],
+     [
+      8.42,
+      0.67
+     ],
+     [
+      8.72,
+      0.286
+     ]
+    ]
+   ],
+   "split_auto": null,
+   "warn": [
+    "low_res_source"
+   ]
+  },
+  {
+   "core_words": [
+    136,
+    213
+   ],
+   "final_words": [
+    134,
+    234
+   ],
+   "core_start": 45.0,
+   "core_end": 65.1,
+   "final_start": 44.31,
+   "final_end": 76.77,
+   "text": "The book was not doing well in sales just because the TV show had been over for a little while, and so the expectation in DC was, well, then the book will eventually just die out. So there was that sort of that gave me the freedom, the safety net, to be able to do kind of whatever I felt like doing. I didn't really have a plan so much as I just had an idea that Wally, in my mind, had a chance to be the first sidekick ever to step into the shoes of his mentor, fully and totally.",
+   "issues": [],
+   "boundary_quality": 1.0,
+   "score": 0.582,
+   "hook": 0.0,
+   "peak": 55,
+   "signals": {
+    "speech": 0.97,
+    "audio": 0.15,
+    "visual": 0.37,
+    "events": 0.38,
+    "ocr": 0.81
+   },
+   "final_score": 0.582,
+   "id": 3,
+   "caption": {
+    "style": null,
+    "scale": 0.9
+   },
+   "layout": "fill",
+   "zoom": null,
+   "focus_x": null,
+   "upscale": "auto",
+   "zooms": [],
+   "captions_n": 101,
+   "captions_overflow": 0,
+   "focus_auto": [
+    [
+     [
+      0.0,
+      0.683
+     ],
+     [
+      0.69,
+      0.683
+     ]
+    ]
+   ],
+   "split_auto": null,
+   "warn": [
+    "low_res_source"
+   ]
+  }
+ ],
+ "cost": {
+  "calls": 0,
+  "cache_hits": 0,
+  "tokens_in": 0,
+  "tokens_out": 0,
+  "usd": 0.0,
+  "caps": {
+   "calls": 6,
+   "tokens": 60000,
+   "usd": 0.1
+  },
+  "rejected_responses": 0,
+  "local_fallbacks": 0,
+  "mode": "smart",
+  "provider": null
+ },
+ "profile": "podcast"
+}

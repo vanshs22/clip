@@ -59,6 +59,9 @@ def fetch_key(url=KEY_URL):
     return parse_public_key(body)
 
 
+_SEEN = __import__('collections').OrderedDict()  # bounded idempotency memory: Kick retries deliveries, a message must be processed once
+
+
 def handle(headers, body, pubkey, sink, max_skew=300, now=None):
     """-> (http_status, text). Verifies, rejects replays older than max_skew s, then sink(epoch, user, text) for chat messages."""
     h = {k.lower(): v for k, v in headers.items()}
@@ -71,6 +74,11 @@ def handle(headers, body, pubkey, sink, max_skew=300, now=None):
         return 400, "bad timestamp"
     if abs((now if now is not None else __import__("time").time()) - t) > max_skew:
         return 401, "stale"
+    if mid in _SEEN:
+        return 200, "duplicate"
+    _SEEN[mid] = 1
+    while len(_SEEN) > 5000:
+        _SEEN.popitem(last=False)
     if h.get("kick-event-type") == "chat.message.sent":
         try:
             j = json.loads(body)
@@ -80,8 +88,9 @@ def handle(headers, body, pubkey, sink, max_skew=300, now=None):
     return 200, "ok"
 
 
-def serve(port, out_path, key=None):
-    """Blocking receiver. Binds 0.0.0.0 (Kick must reach it through your tunnel); only signed requests are accepted."""
+def serve(port, out_path, key=None, bind="127.0.0.1"):
+    """Blocking receiver on 127.0.0.1 by default (put an HTTPS tunnel/reverse proxy in front: Kick needs a public HTTPS URL); only signed, fresh,
+    non-duplicate requests are accepted. Verification status of real Kick delivery: see docs."""
     key = key or fetch_key()
     out = open(out_path, "a")
 
@@ -100,4 +109,4 @@ def serve(port, out_path, key=None):
         def log_message(self, *a):
             pass
     print(f"kick relay on :{port} -> {out_path}  (monitor with --chat-file {out_path})", flush=True)
-    HTTPServer(("0.0.0.0", port), H).serve_forever()
+    HTTPServer((bind, port), H).serve_forever()

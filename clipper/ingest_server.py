@@ -3,7 +3,8 @@ Push RTMP to rtmp://HOST:1935/live/<key>, then `clipper monitor rtmp://127.0.0.1
 (release asset from GitHub) into the model cache."""
 import os, platform, shutil, subprocess, tarfile, tempfile, urllib.request, json
 from pathlib import Path
-from .speaker import CACHE
+from .models import CACHE
+from .util import safe_extract_tar
 
 
 def binary():
@@ -21,7 +22,8 @@ def binary():
             f = Path(d) / "m.tgz"
             urllib.request.urlretrieve(f"https://github.com/bluenviron/mediamtx/releases/download/{rel}/mediamtx_{rel}_{osn}_{arch}.tar.gz", f)
             exe.parent.mkdir(parents=True, exist_ok=True)
-            tarfile.open(f).extractall(exe.parent)
+            with tarfile.open(f) as tf:
+                safe_extract_tar(tf, exe.parent)  # refuses '..', absolute paths and links
         exe.chmod(0o755)
     return str(exe)
 

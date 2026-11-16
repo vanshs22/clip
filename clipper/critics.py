@@ -94,9 +94,17 @@ def cut(x, R_):
         nxt_end = x.words[x.sents[si + 1][1]]["e"] if si is not None and si + 1 < len(x.sents) else None
         own_end = x.words[x.sents[si][1]]["e"] if si is not None else last["e"] + 2
         if not B.END.search(last["w"]):
-            R_.add(c, "major", "cut_mid_sentence", f"Ends mid-thought on \"{last['w']}\"", f"last word {last['w']!r} has no terminal punctuation",
-                   "a finished sentence", "extend to the end of the thought", "Never cut a person off mid-sentence. The audience feels it.",
-                   t=round(d, 1), edit={"end_shift": round(min(15, own_end + 0.4 - c["final_end"]), 2)})
+            src_ends = si is not None and si >= len(x.sents) - 1 and not B.END.search(x.words[x.sents[si][1]]["w"])  # the SOURCE stops mid-thought: nothing to extend to
+            if src_ends:
+                done = [w for w in ws if B.END.search(w["w"])]  # trim back to the last complete sentence still inside the clip
+                keep = done[-1]["e"] + 0.4 - c["final_start"] if done else 0
+                R_.add(c, "major", "cut_mid_sentence", f"Source ends mid-thought on \"{last['w']}\"", f"transcript ends at {x.words[-1]['e']:.1f}s without a full stop",
+                       "a finished sentence", "trim back to the last complete sentence" if keep >= 8 else "re-select: no complete ending available", "The footage itself stops mid-sentence: end on the last finished thought.",
+                       t=round(d, 1), edit={"end_shift": round(done[-1]["e"] + 0.4 - c["final_end"], 2)} if keep >= 8 else None, target="boundaries" if keep >= 8 else "selection")
+            else:
+                R_.add(c, "major", "cut_mid_sentence", f"Ends mid-thought on \"{last['w']}\"", f"last word {last['w']!r} has no terminal punctuation",
+                       "a finished sentence", "extend to the end of the thought", "Never cut a person off mid-sentence. The audience feels it.",
+                       t=round(d, 1), edit={"end_shift": round(min(15, own_end + 0.4 - c["final_end"]), 2)})
         elif last["w"].rstrip("\"')").endswith("?") and nxt_end and nxt_end - c["final_end"] < 12:
             R_.add(c, "major", "unanswered_question", "Ends on a question with no answer", f"last word {last['w']!r}", "the answer or the reaction",
                    "extend to the next sentence", "A question is a promise. Pay it off or the viewer swipes.", t=round(d, 1),
@@ -183,13 +191,13 @@ def captions_(x, R_):
         ws = x.cw(c)
         if not ws:
             continue
-        style = (c.get("caption") or {}).get("style", "bold_pop")
+        style = (c.get("caption") or {}).get("style") or x.j.opts.get("style") or "bold_pop"
         if style == "none" and len(ws) > 8:
             R_.add(c, "minor", "no_captions", "Speech without captions", "caption style none", "captions on (most viewers watch muted)", "enable a style",
                    "Sound-off is the default.", edit={"captions": "bold_pop"})
             continue
         if style != "none":
-            ch = captions.chunks(ws, captions.PRESETS[style], (c.get("caption") or {}).get("scale", 1.0))
+            ch = captions.chunks(ws, captions.style(style, x.j.opts.get("style_file")), (c.get("caption") or {}).get("scale", 1.0))
             fast = [k for k in ch if len(" ".join(w["w"] for w in k)) / max(k[-1]["e"] - k[0]["s"], 0.05) > 24]
             if len(fast) > 0.2 * len(ch):
                 R_.add(c, "minor", "reading_speed", f"{len(fast)}/{len(ch)} caption groups flash by faster than 24 chars/s", "chunk timing", "<= 20 chars/s",

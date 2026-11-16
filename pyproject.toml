@@ -1,19 +1,41 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "clipper"
-version = "0.1.0"
-description = "Agent-callable AI video clipping skill: local-first detection, exact boundaries, ASS captions, FFmpeg rendering"
+version = "0.4.0"
+description = "Agent-callable AI video clipping toolkit: local-first highlight detection, exact boundaries, captions, rendering, editor-critic, live streams"
+readme = "README.md"
 requires-python = ">=3.10"
-dependencies = []                      # core is stdlib + ffmpeg
+license = { text = "MIT" }
+dependencies = []                      # CORE = Python standard library + an ffmpeg binary. Everything else is an optional group.
 
 [project.optional-dependencies]
-url = ["yt-dlp", "streamlink"]
-stt = ["faster-whisper"]
-vision = ["opencv-python-headless", "numpy", "rapidocr-onnxruntime", "panns-inference", "speechbrain"]  # NOTE: rapidocr pulls opencv-python; keep only opencv-python-headless (see README of docs/SPEC.md)
-ffmpeg = ["imageio-ffmpeg"]
-all = ["yt-dlp", "streamlink", "faster-whisper", "opencv-python-headless", "numpy", "rapidocr-onnxruntime", "panns-inference", "speechbrain", "imageio-ffmpeg"]
+# Install only what you need. `pip install clipper[recommended]` = the everyday set. Pins are the versions validated in this project (see requirements-lock.txt).
+downloader    = ["yt-dlp==2026.10.26", "streamlink"]
+transcription = ["faster-whisper==1.2.1"]
+vision        = ["opencv-python-headless==5.0.0.93", "numpy==2.4.6"]                 # face framing, scene/motion helpers
+audio         = ["panns-inference==0.1.1", "torch==2.15.0", "numpy==2.4.6"]                  # PANNs sound events (laughter/applause/cheering)
+speaker       = ["speechbrain==1.1.2", "torch==2.15.0", "torchaudio==2.11.1", "python_speech_features==0.6", "opencv-python-headless==5.0.0.93", "numpy==2.4.6"]                # who-is-speaking following (ECAPA voices + faces)
+ocr           = ["rapidocr-onnxruntime==1.4.4"]                    # on-screen text. NOTE: pulls opencv-python; run scripts/install.py (it repairs this) or see INSTALLATION.md
+livestream    = ["websocket-client==1.9.2"]
+upscaling     = ["opencv-contrib-python-headless==5.0.0.93"]  # CONFLICTS with opencv-python-headless (both provide cv2): install INSTEAD of the vision group, never together              # CPU super-resolution experiments (opt-in; not used by default)
+agents        = []                         # MCP + HTTP are stdlib: nothing to install
+ffmpeg        = ["imageio-ffmpeg>=0.4.9"]  # a bundled ffmpeg if you do not have one on PATH
+recommended   = ["yt-dlp==2026.10.26", "streamlink", "faster-whisper==1.2.1", "opencv-python-headless==5.0.0.93", "numpy==2.4.6"]
+dev           = ["pytest==9.2.0", "cryptography==50.0.2", "imageio-ffmpeg==0.8.1"]
 
 [project.scripts]
 clipper = "clipper.cli:main"
 
-[tool.setuptools]
-packages = ["clipper"]
+[tool.setuptools.packages.find]
+include = ["clipper*"]
+
+[tool.setuptools.package-data]
+clipper = ["fonts/*", "models_manifest.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["live: needs MediaMTX + ffmpeg and takes minutes", "slow: > 30 s", "gpu: needs a GPU"]
+addopts = "-p no:cacheprovider"

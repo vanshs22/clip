@@ -5,22 +5,10 @@ landmark-aligned mouth patch, then compare it with the transcript's speech activ
 no training, CPU only, validated on real footage in tests/validate_real.py (see docs/SPEC.md for the measured accuracy)."""
 import os, shutil, subprocess, urllib.request
 from pathlib import Path
-from .util import ffmpeg, median
+from .util import ffmpeg, median, note_skipped
 
-YUNET = "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
-CACHE = Path(os.environ.get("CLIPPER_MODELS", Path.home() / ".cache" / "clipper"))
-
-
-def fetch(name, url):
-    """Download a model once. Returns its path."""
-    p = CACHE / name
-    if not p.exists():
-        p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(".part")
-        with urllib.request.urlopen(url, timeout=60) as r, open(tmp, "wb") as f:
-            shutil.copyfileobj(r, f)
-        tmp.replace(p)
-    return p
+from . import models
+from .models import CACHE, ModelUnavailable  # noqa: F401  (CACHE re-exported for ingest_server)
 
 
 def frames(src, t0, t1, fps, width=1280):
@@ -54,7 +42,10 @@ def detect_faces(fr, score=0.7):
     h, w = fr.shape[:2]
     d = _YN.get("d")
     if d is None or _YN.get("sz") != (w, h):
-        d = _YN["d"] = cv2.FaceDetectorYN.create(str(fetch("yunet.onnx", YUNET)), "", (w, h), score, 0.3, 5000)
+        mp = models.try_ensure("yunet.onnx", "face detection / speaker following / framing")
+        if mp is None:  # offline or download failed: no faces, so framing falls back to a centred crop
+            return []
+        d = _YN["d"] = cv2.FaceDetectorYN.create(str(mp), "", (w, h), score, 0.3, 5000)
         _YN["sz"] = (w, h)
     _, f = d.detect(fr)
     return [] if f is None else [{"cx": (r[0] + r[2] / 2) / w, "cy": (r[1] + r[3] / 2) / h, "size": r[2] * r[3] / (w * h),
@@ -150,7 +141,12 @@ def voice_windows(src, t0, t1, words, win=2.0, hop=1.0, sr=16000):
     import torch
     from speechbrain.inference.speaker import EncoderClassifier
     if not _ENC:
-        _ENC.append(EncoderClassifier.from_hparams(source="speechbrain/spkrec-ecapa-voxceleb", savedir=str(CACHE / "ecapa"), run_opts={"device": "cpu"}))
+        try:
+            d = models.ensure_group("ecapa/")
+        except ModelUnavailable as e:
+            note_skipped("speaker voices (ECAPA)", str(e))
+            raise ImportError(str(e))  # callers already treat ImportError as "feature unavailable"
+        _ENC.append(EncoderClassifier.from_hparams(source=str(d), savedir=str(d), run_opts={"device": "cpu"}))
     raw = subprocess.run([ffmpeg(), "-v", "error", "-ss", f"{t0:.3f}", "-t", f"{t1 - t0:.3f}", "-i", str(src), "-vn", "-ac", "1", "-ar", str(sr), "-f", "s16le", "-"],
                          capture_output=True).stdout
     a = np.frombuffer(raw, np.int16).astype(np.float32) / 32768

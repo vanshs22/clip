@@ -1,3 +1,5 @@
+> **Superseded for current status by [VALIDATION.md](VALIDATION.md)** (release 0.4.0). This file keeps the earlier research notes and measurements (speaker detection, upscaler benchmark, RIFE, MediaMTX, Kick).
+
 # clipper: design, QC and roadmap
 
 ## What we took from the references

@@ -1,0 +1,6 @@
+# Defaults for every `clipper run/watch/process` (CLI flags and environment win). Copy to ./clipper.toml or ~/.config/clipper/config.toml. Never put keys here.
+mode = "smart"          # disabled | local_only | smart | quality
+style = "bold_pop"      # bold_pop karaoke clean_lower boxed minimal_white highlight_words podcast_speaker gaming_bold cinematic custom
+quality = "high"        # draft | normal | high
+clips = 10
+max_usd = 0.10          # hard OpenAI cap per job

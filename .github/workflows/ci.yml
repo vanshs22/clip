@@ -1,0 +1,34 @@
+name: ci
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  cpu:   # CPU-only, no optional AI packages: the guaranteed configuration. Windows + macOS + Linux, oldest and newest supported Python.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.10", "3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ matrix.python }}" }
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install ".[dev]"      # core + pytest + cryptography + imageio-ffmpeg (bundled ffmpeg, no system install needed)
+      - run: python -m clipper doctor
+      - run: python -m pytest tests/test_unit.py tests/test_integration.py tests/test_agents.py -m "not live and not gpu" -q
+  live:    # real RTMP + MediaMTX end to end (Linux only: binary download); optional, minutes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: python -m pip install ".[dev]"
+      - run: python -m pytest tests/test_live.py -m live -q
+  # GPU workflow (manual, self-hosted runner with a GPU): encoders + optional upscalers. Never part of the required checks.
+  gpu:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, gpu]
+    steps:
+      - uses: actions/checkout@v4
+      - run: python -m pip install ".[dev,recommended]"
+      - run: python -m pytest -m gpu -q

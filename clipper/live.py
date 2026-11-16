@@ -1,10 +1,10 @@
 """Live monitor: rolling segment buffer + full recording, chat/audio spike detection, preliminary clips.
 Final selection happens AFTER the stream: `clipper process record.ts --chat chat.jsonl` reuses everything here.
 v1 live signals: chat (Twitch IRC, or tail --chat-file) + audio level. Live speech/vision run post-stream."""
-import datetime, importlib.util, json, os, re, shutil, socket, ssl, threading, time, urllib.parse, urllib.request
+import collections, datetime, importlib.util, json, os, re, shutil, signal, socket, ssl, threading, time, urllib.parse, urllib.request
 from pathlib import Path
 from .signals import SpikeDetector, word_score
-from .util import ffmpeg, run, hms
+from .util import ffmpeg, run, hms, jload, jsave, log_event, note_skipped, check_disk, validate_source
 import subprocess
 
 SEG = 4          # seconds per buffer segment
@@ -163,107 +163,234 @@ def stream_url(src):
     return r.stdout.strip().splitlines()[0]
 
 
-def extract(buf_dir, seg_names, start_idx, end_idx, a, b, out):
-    """Concatenate buffer segments [start_idx, end_idx] and cut [a, b] (stream seconds). Stream copy: keyframe-accurate only."""
+STATES = ("starting", "waiting_for_stream", "recording", "finalizing", "processing", "done", "failed", "cancelled")
+MAX_CHAT_BINS = 400      # ~66 min of 10 s bins: the adaptive baseline never needs more
+MAX_PENDING_CHAT = 20000  # messages waiting for the stream clock; oldest dropped beyond this (bounded memory on multi-hour streams)
+
+
+class Session:
+    """Persistent live-session metadata (session.json): state machine + paths + gaps. Survives a crash; `watch --resume` continues from it."""
+
+    def __init__(self, out):
+        self.out = Path(out)
+        self.out.mkdir(parents=True, exist_ok=True)
+        self.d = jload(self.out / "session.json", {}) or {"state": "starting", "parts": [], "gaps": [], "history": [], "created": time.time()}
+
+    def set(self, state, **kw):
+        assert state in STATES, state
+        self.d.update(kw, state=state)
+        self.d["history"].append([state, round(time.time(), 1)])
+        self.d["history"] = self.d["history"][-50:]
+        jsave(self.out / "session.json", self.d)
+        log_event(self.out / "session.log", "state", state=state, **{k: v for k, v in kw.items() if not isinstance(v, (list, dict))})
+
+
+def extract(buf_dir, seg_names, start_idx, end_idx, a, b, out, reencode=True):
+    """Concatenate buffer segments [start_idx, end_idx] and cut [a, b] (stream seconds). Re-encoded by default: stream-copy can only cut on
+    keyframes, so clip edges would be off by up to a GOP (several seconds)."""
     names = [n for n in seg_names if start_idx <= int(n[4:10]) <= end_idx]
     if not names:
         return None
     first = int(names[0][4:10])  # oldest segment may already be pruned
     lst = Path(buf_dir) / f"list_{start_idx}.txt"
     lst.write_text("".join(f"file '{n}'\n" for n in names))
-    r = run([ffmpeg(), "-y", "-hide_banner", "-f", "concat", "-safe", "0", "-i", lst, "-ss", f"{max(0.0, a - first * SEG):.2f}", "-t", f"{b - a:.2f}", "-c", "copy", out], cwd=buf_dir)
+    codec = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac"] if reencode else ["-c", "copy"]
+    r = run([ffmpeg(), "-y", "-hide_banner", "-f", "concat", "-safe", "0", "-i", lst, "-ss", f"{max(0.0, a - first * SEG):.2f}", "-t", f"{b - a:.2f}", *codec, out], cwd=buf_dir, timeout=900)
     lst.unlink(missing_ok=True)
     return out if r.returncode == 0 else None
 
 
-def monitor(src, out_dir, chat_src=None, latency=8.0, record=True, log=print, max_seconds=None, stt=True, warmup=10, pre=PRE, post=POST, open_retries=12):
+def _ffmpeg_cmd(src, buf, record, start_number):
+    return [ffmpeg(), "-hide_banner", "-loglevel", "error", *(["-re"] if os.path.exists(src) else []), "-i", stream_url(src),
+            "-map", "0", "-c", "copy", "-f", "segment", "-segment_time", SEG, "-segment_format", "mpegts", "-segment_start_number", start_number, str(buf / "seg_%06d.ts"),
+            *(["-map", "0", "-c", "copy", "-f", "mpegts", str(record)] if record else [])]
+
+
+def monitor(src, out_dir, chat_src=None, latency=8.0, record=True, log=print, max_seconds=None, stt=True, warmup=10, pre=PRE, post=POST,
+            open_retries=12, reconnect=True, stop_event=None, judge_fn=None, session=None):
+    """Watch a live source until it ends (or max_seconds / stop_event). Keeps memory bounded however long the stream runs.
+    Returns the Session. After it returns the caller finalizes (see `finalize`)."""
+    validate_source(src)
     out = Path(out_dir)
+    check_disk(out, float(os.environ.get("CLIPPER_MIN_FREE_GB", 2)))
+    sess = session or Session(out)
     buf = out / "buffer"
     shutil.rmtree(buf, ignore_errors=True)
     buf.mkdir(parents=True, exist_ok=True)
-    cmd = [ffmpeg(), "-hide_banner", "-loglevel", "error", *(["-re"] if os.path.exists(src) else []), "-i", stream_url(src),
-           "-map", "0", "-c", "copy", "-f", "segment", "-segment_time", SEG, "-segment_format", "mpegts", str(buf / "seg_%06d.ts")]
-    if record:
-        cmd += ["-map", "0", "-c", "copy", "-f", "mpegts", str(out / "record.ts")]
-    for attempt in range(open_retries + 1):  # a monitor and a stream never start at the same instant
-        proc = subprocess.Popen([str(c) for c in cmd])
-        time.sleep(3)
-        if proc.poll() is None or attempt == open_retries:
-            break
-        log(f"stream not available yet, retrying ({attempt + 1}/{open_retries})")
-        time.sleep(5)
-    t0, stop, chat_t, events, done_extract = time.time(), threading.Event(), [], [], set()
+    stop = stop_event or threading.Event()
+    sess.set("waiting_for_stream", src=src, pre=pre, post=post, latency=latency)
+    parts = []                      # record_000.ts, record_001.ts ... (one per ffmpeg run; a reconnect starts a new part)
+    next_seg = 0
     chat_f = open(out / "chat.jsonl", "a")
-
-    rows, obs = [], []  # chat is held as wall-clock until the stream clock is known
+    rows = collections.deque(maxlen=MAX_PENDING_CHAT)
+    obs = collections.deque(maxlen=15)
+    bins = collections.OrderedDict()   # chat bin -> message count (rolling)
+    t0 = time.time()
 
     def sink(wall, user, text):
         rows.append((wall, user, text))
 
     def flush_chat():
-        """wall clock -> stream PTS. Each loop we know the media time `now` of the newest finished segment; wall - now is the clock offset
-        (it includes delivery lag + poll delay). The MEDIAN of recent observations ignores the initial burst of buffered segments that a
-        relay like MediaMTX sends, and `latency` calibrates the chat-vs-video delay the viewers add on top."""
+        """wall clock -> stream PTS via the MEDIAN of (wall - media time of newest finished segment): robust to the initial burst of buffered
+        segments a relay sends and to reconnect gaps. `latency` is the chat-vs-video delay viewers add on top."""
         if len(obs) < 5:
             return
-        off = sorted(obs[-15:])[len(obs[-15:]) // 2]
+        off = sorted(obs)[len(obs) // 2]
         while rows:
-            wall, user, text = rows.pop(0)
+            wall, user, text = rows.popleft()
             t = wall - off - latency
-            chat_t.append(t)
+            bins[int(t // BIN)] = bins.get(int(t // BIN), 0) + 1
             chat_f.write(json.dumps({"t": round(t, 2), "u": user, "m": text}) + "\n")
+        while len(bins) > MAX_CHAT_BINS:
+            bins.popitem(last=False)
         chat_f.flush()
     if chat_src:
         threading.Thread(target=chat_src, args=(sink, stop), daemon=True).start()
-    keep = max(KEEP, pre + post + 2 * BIN)
-    chat_det, aud_det, seen, bin_i = SpikeDetector(60, 6.0, 8, warmup), SpikeDetector(60, 4.0, 1, warmup), set(), 0
+    chat_det, aud_det, seen, bin_i = SpikeDetector(60, 6.0, 8, warmup), SpikeDetector(60, 4.0, 1, warmup), collections.OrderedDict(), 0
     lt = LiveTranscriber(buf) if stt and importlib.util.find_spec("faster_whisper") else None
-    sp_det, spbin, sp_f = SpikeDetector(60, 5.0, 3, warmup), {}, open(out / "live-transcript.jsonl", "a")
+    sp_det, spbin = SpikeDetector(60, 5.0, 3, warmup), {}
+    sp_f = open(out / "live-transcript.jsonl", "a")
+    live_words = collections.deque(maxlen=6000)   # recent words for live judging context
     if stt and not lt:
-        log("live speech: faster-whisper not installed, skipping (chat + audio only)")
+        note_skipped("live speech transcription", "faster-whisper not installed: chat + audio spikes only")
+    events, done_extract, all_events = [], set(), []
+    ev_f = open(out / "events.jsonl", "a")
+
+    def add_event(e):
+        events.append(e)
+        ev_f.write(json.dumps(e) + "\n")
+        ev_f.flush()
+        if len(events) > 400:  # old events are already merged/extracted; the file keeps the full history
+            del events[:100]
     try:
-        while proc.poll() is None and (max_seconds is None or time.time() - t0 < max_seconds):
-            time.sleep(2)
-            segs = sorted(p.name for p in buf.glob("seg_*.ts"))
-            for n in segs[:-1]:  # the last file is still being written
-                if n in seen:
-                    continue
-                seen.add(n)
-                i = int(n[4:10])
-                r = run([ffmpeg(), "-hide_banner", "-i", buf / n, "-vn", "-af", "astats=metadata=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-", "-f", "null", "-"])
-                lv = [float(x) for x in re.findall(r"RMS_level=(-?[\d.]+)", r.stdout)]
-                if lv and aud_det.feed(max(lv[-1], -90) + 90):
-                    events.append({"pts": i * SEG, "kind": "audio", "x": lv[-1]})
-            for w in (lt.poll(sorted(seen)) if lt else []):  # words are scored as they arrive; speech spikes join chat/audio events
-                spbin[int(w["s"] // BIN)] = spbin.get(int(w["s"] // BIN), 0.0) + word_score(w)
-                sp_f.write(json.dumps(w) + "\n")
-            sp_f.flush()
-            now = (len(seen)) * SEG
-            obs.append(time.time() - now)
-            flush_chat()
-            while (bin_i + 1) * BIN <= now:  # complete chat bins
-                c = sum(1 for t in chat_t if bin_i * BIN <= t < (bin_i + 1) * BIN)
-                if chat_det.feed(c):
-                    events.append({"pts": bin_i * BIN, "kind": "chat", "x": c})
-                if lt and sp_det.feed(spbin.pop(bin_i, 0.0)):
-                    events.append({"pts": bin_i * BIN, "kind": "speech", "x": 0})
-                bin_i += 1
-            for w in merge_events(events, pre, post):
-                key = round(w["start"])
-                if w["end"] <= now and key not in done_extract:
-                    done_extract.add(key)
-                    f = extract(buf, segs, int(w["start"] // SEG), int(w["end"] // SEG), w["start"], w["end"], out / f"prelim_{hms(w['start']).replace(':', '-')}.mkv")
-                    log(f"event {hms(w['start'])}-{hms(w['end'])} {w['kinds']} conf={w['confidence']} -> {f}")
-            for n in segs:  # rolling retention
-                if int(n[4:10]) * SEG < now - keep:
-                    (buf / n).unlink(missing_ok=True)
-            (out / "events.json").write_text(json.dumps(merge_events(events, pre, post), indent=1))
+        while not stop.is_set():
+            record_part = out / f"record_{len(parts):03d}.ts" if record else None
+            if record_part:
+                parts.append(record_part)
+            proc = subprocess.Popen([str(c) for c in _ffmpeg_cmd(src, buf, record_part, next_seg)], stderr=subprocess.DEVNULL if not os.environ.get("CLIPPER_DEBUG") else None)
+            ok = False
+            for attempt in range(open_retries + 1):
+                time.sleep(3)
+                if proc.poll() is None:
+                    ok = True
+                    break
+                if attempt == open_retries:
+                    break
+                log(f"stream not available yet, retrying ({attempt + 1}/{open_retries})")
+                time.sleep(5)
+                proc = subprocess.Popen([str(c) for c in _ffmpeg_cmd(src, buf, record_part, next_seg)], stderr=subprocess.DEVNULL)
+            if not ok:
+                if record_part and parts and parts[-1] == record_part and not record_part.exists():
+                    parts.pop()
+                break  # never came up (or already ended): finalize with what we have
+            sess.set("recording", parts=[p.name for p in parts], gaps=sess.d.get("gaps", []))
+            while proc.poll() is None and not stop.is_set() and (max_seconds is None or time.time() - t0 < max_seconds):
+                time.sleep(2)
+                segs = sorted(p.name for p in buf.glob("seg_*.ts"))
+                for n in segs[:-1]:  # the last file is still being written
+                    if n in seen:
+                        continue
+                    seen[n] = 1
+                    while len(seen) > 600:
+                        seen.popitem(last=False)
+                    i = int(n[4:10])
+                    r = run([ffmpeg(), "-hide_banner", "-i", buf / n, "-vn", "-af", "astats=metadata=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-", "-f", "null", "-"], timeout=60)
+                    lv = [float(x) for x in re.findall(r"RMS_level=(-?[\d.]+)", r.stdout)]
+                    if lv and aud_det.feed(max(lv[-1], -90) + 90):
+                        add_event({"pts": i * SEG, "kind": "audio", "x": lv[-1]})
+                for w in (lt.poll(sorted(seen)) if lt else []):
+                    spbin[int(w["s"] // BIN)] = spbin.get(int(w["s"] // BIN), 0.0) + word_score(w)
+                    sp_f.write(json.dumps(w) + "\n")
+                    live_words.append(w)
+                sp_f.flush()
+                now = (int(segs[-2][4:10]) + 1 if len(segs) >= 2 else 0) * SEG  # media time at the end of the newest FINISHED segment
+                obs.append(time.time() - now)
+                flush_chat()
+                while (bin_i + 1) * BIN <= now:  # complete bins
+                    c = bins.get(bin_i, 0)
+                    if chat_det.feed(c):
+                        add_event({"pts": bin_i * BIN, "kind": "chat", "x": c})
+                    if lt and sp_det.feed(spbin.pop(bin_i, 0.0)):
+                        add_event({"pts": bin_i * BIN, "kind": "speech", "x": 0})
+                    bin_i += 1
+                    for k in [k for k in spbin if k < bin_i - 6]:
+                        spbin.pop(k, None)
+                for w in merge_events(events, pre, post):
+                    key = round(w["start"])
+                    if w["end"] <= now and key not in done_extract:
+                        done_extract.add(key)
+                        f = extract(buf, segs, int(w["start"] // SEG), int(w["end"] // SEG), w["start"], w["end"], out / f"prelim_{hms(w['start']).replace(':', '-')}.mkv")
+                        w["clip"] = str(f) if f else None
+                        if judge_fn and w["confidence"] >= 0.6:  # local evidence justifies a (budgeted, cached) LLM opinion
+                            try:
+                                w["llm"] = judge_fn(w, list(live_words))
+                            except Exception as e:  # a judge failure must not stop the recording
+                                log_event(out / "session.log", "judge_error", error=str(e)[:200])
+                        all_events.append(w)
+                        log(f"event {hms(w['start'])}-{hms(w['end'])} {w['kinds']} conf={w['confidence']} -> {f}")
+                keepn = max(KEEP, pre + post + 2 * BIN)
+                for n in segs:  # rolling retention
+                    if int(n[4:10]) * SEG < now - keepn:
+                        (buf / n).unlink(missing_ok=True)
+                jsave(out / "events.json", all_events[-500:])
+            ended_by_limit = stop.is_set() or (max_seconds is not None and time.time() - t0 >= max_seconds)
+            try:
+                proc.terminate()
+                proc.wait(timeout=10)
+            except Exception:
+                proc.kill()
+            segs_now = sorted(buf.glob("seg_*.ts"))
+            next_seg = (int(segs_now[-1].name[4:10]) + 1) if segs_now else next_seg
+            if ended_by_limit or not reconnect:
+                break
+            # the source dropped: try to reconnect for a while (a reconnect = a new record part, a timestamp reset, a recorded gap)
+            gap_start = time.time()
+            sess.set("waiting_for_stream", gaps=sess.d.get("gaps", []))
+            back = False
+            for _ in range(6):
+                time.sleep(5)
+                if stop.is_set():
+                    break
+                if run([ffmpeg(), "-hide_banner", "-v", "error", "-i", stream_url(src), "-t", "1", "-f", "null", "-"], timeout=30).returncode == 0:
+                    back = True
+                    break
+            if not back:
+                break
+            sess.d.setdefault("gaps", []).append({"at_media_s": next_seg * SEG, "seconds": round(time.time() - gap_start, 1)})
     finally:
         stop.set()
-        proc.terminate()
-        chat_f.close()
-        sp_f.close()
-    log(f"stopped. Next: clipper process {out / 'record.ts'} --chat {out / 'chat.jsonl'}")
+        for fh in (chat_f, sp_f, ev_f):
+            try:
+                fh.close()
+            except Exception:
+                pass
+        jsave(out / "events.json", all_events[-500:])
+    sess.set("finalizing", parts=[p.name for p in parts if p.exists()])
+    return sess
+
+
+def finalize(out_dir, log=print):
+    """Stop-of-stream housekeeping, run automatically: (1) join record parts into record.ts (re-encoded if a reconnect reset timestamps),
+    (2) return the paths the VOD pipeline needs."""
+    out = Path(out_dir)
+    sess = Session(out)
+    parts = [out / n for n in sess.d.get("parts", []) if (out / n).exists() and (out / n).stat().st_size > 10000]
+    if not parts:
+        raise SystemExit("nothing was recorded (the stream never came up?)")
+    rec = out / "record.ts"
+    if len(parts) == 1:
+        os.replace(parts[0], rec)
+    else:
+        lst = out / "parts.txt"
+        lst.write_text("".join(f"file '{p.name}'\n" for p in parts))
+        r = run([ffmpeg(), "-y", "-hide_banner", "-f", "concat", "-safe", "0", "-i", lst, "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", "-f", "mpegts", rec], cwd=out, timeout=7200)
+        if r.returncode:
+            raise SystemExit("could not join the recorded parts: " + r.stderr[-300:])
+        for p in parts:
+            p.unlink(missing_ok=True)
+        lst.unlink(missing_ok=True)
+    evs = [e for e in (jload(out / "events.json", []) or [])]
+    return {"record": str(rec), "chat": str(out / "chat.jsonl"), "events": str(out / "events.json"), "n_events": len(evs)}
 
 
 def sync_check(out_dir, radius=25):
