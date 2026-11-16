@@ -10,3 +10,7 @@ _ref/
 *.part
 *.crt
 *.key
+*.pt
+*.pth
+*.onnx
+*.pb
