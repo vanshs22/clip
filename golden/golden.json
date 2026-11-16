@@ -1,0 +1,17 @@
+{
+  "about": "Reference clips chosen by a human reading the transcript: each is a complete thought with setup and payoff. Videos are public domain (US government) and are NOT stored here: run golden/fetch.sh. Times are seconds into the slice produced by fetch.sh.",
+  "entries": [
+    {"video": "golden/media/panel1.mkv", "transcript": "golden/media/panel1.words.json", "profile": "interview",
+     "refs": [
+       {"start": 135.9, "end": 174.0, "why": "vocational-school story: setup (push for vocational schools), anecdote, punchline 'that's what he liked'"},
+       {"start": 84.2, "end": 101.1, "why": "tax cuts for millennials: claim, consequence, 'more money in your paycheck'"},
+       {"start": 12.4, "end": 38.4, "why": "interviewer's setup: 'historic', then the millennial tax cut line"}
+     ]},
+    {"video": "golden/media/panel2.mkv", "transcript": "golden/media/panel2.words.json", "profile": "interview",
+     "refs": [
+       {"start": 69.2, "end": 93.4, "why": "campus free-speech answer: 'great question', numbers are different, majority want free speech"},
+       {"start": 141.5, "end": 160.0, "why": "'what advice for the 25-year-old Trump?' and the answer 'Don't run for president.'"},
+       {"start": 0.0, "end": 19.9, "why": "regulations claim: 'never been an administration...', cutting regulations matters more than tax"}
+     ]}
+  ]
+}

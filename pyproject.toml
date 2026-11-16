@@ -8,9 +8,9 @@ dependencies = []                      # core is stdlib + ffmpeg
 [project.optional-dependencies]
 url = ["yt-dlp", "streamlink"]
 stt = ["faster-whisper"]
-vision = ["opencv-python-headless", "ultralytics", "rapidocr-onnxruntime", "panns-inference", "numpy"]
+vision = ["opencv-python-headless", "numpy", "rapidocr-onnxruntime", "panns-inference", "resemblyzer"]  # NOTE: rapidocr pulls opencv-python; keep only opencv-python-headless (see README of docs/SPEC.md)
 ffmpeg = ["imageio-ffmpeg"]
-all = ["yt-dlp", "streamlink", "faster-whisper", "opencv-python-headless", "ultralytics", "rapidocr-onnxruntime", "panns-inference", "numpy", "imageio-ffmpeg"]
+all = ["yt-dlp", "streamlink", "faster-whisper", "opencv-python-headless", "numpy", "rapidocr-onnxruntime", "panns-inference", "resemblyzer", "imageio-ffmpeg"]
 
 [project.scripts]
 clipper = "clipper.cli:main"

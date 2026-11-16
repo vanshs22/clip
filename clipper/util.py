@@ -38,11 +38,18 @@ def jload(p, default=None):
     return json.loads(p.read_text()) if p.exists() else default
 
 
+def _plain(o):
+    """numpy scalars/arrays (from the optional vision/speaker models) -> plain JSON."""
+    if hasattr(o, "tolist"):
+        return o.tolist()
+    raise TypeError(f"not JSON serialisable: {type(o).__name__}")
+
+
 def jsave(p, obj):
     p = Path(p)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(p.suffix + ".tmp")  # atomic: a crash never leaves a half-written artifact
-    tmp.write_text(json.dumps(obj, indent=1, ensure_ascii=False))
+    tmp.write_text(json.dumps(obj, indent=1, ensure_ascii=False, default=_plain))
     tmp.replace(p)
 
 

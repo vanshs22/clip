@@ -1,7 +1,7 @@
 """One runnable check: `clipper selftest` (or python -m tests.selftest). Offline; the ffmpeg e2e part is skipped if no ffmpeg."""
 import json, os, random, re, subprocess, sys, tempfile, time, urllib.request
 from pathlib import Path
-from clipper import bench, boundaries as B, critics as C, extras, upscale, captions, job as J, live, llm, signals as S, render as R
+from clipper import bench, boundaries as B, critics as C, extras, kick, speaker as SP, upscale, captions, job as J, live, llm, signals as S, render as R
 from clipper.util import ffmpeg, probe
 
 
@@ -123,6 +123,43 @@ def check_phase2_pure():
         assert [Path(b["file"]).stem for b in m] == ["pizza", "golden_goal"] and m[0]["t"] > 0, m
 
 
+def check_speaker_logic():
+    """Model-free parts of active-speaker following (the model parts are validated on real footage: tests/validate_real.py)."""
+    an = {"t": [i * 0.5 for i in range(40)], "tracks": [{"x": [0.25] * 40}, {"x": [0.75] * 40}]}
+    tl = [(i * 0.5, 0) for i in range(0, 12)] + [(i * 0.5, 1) for i in range(12, 40)]
+    kf = SP.follow_keyframes(an, tl)
+    assert kf[0][1] == 0.25 and kf[-1][1] == 0.75 and len(kf) == 3, kf          # one glide to the new speaker, after the dwell time
+    flick = [(i * 0.5, 0 if i % 2 else 1) for i in range(30)]                    # interjections every 0.5 s must NOT ping-pong the camera
+    assert len(SP.follow_keyframes(an, flick)) <= 3
+    a = {"x": [0.2, None, None], "size": [1, 0, 0], "act": [None] * 3, "p": [None] * 3}
+    b = {"x": [None, None, 0.22], "size": [0, 0, 1], "act": [None] * 3, "p": [None] * 3}
+    assert len(SP.stitch([a, b])) == 1                                           # the same person re-detected later is one track
+    assert SP.silhouette(__import__("numpy").array([[1, 0], [1, .1], [0, 1], [.1, 1.]]), __import__("numpy").array([0, 0, 1, 1])) > 0.5 if __import__("importlib").util.find_spec("numpy") else True
+
+
+def check_kick():
+    import base64, time as _t
+    try:
+        from cryptography.hazmat.primitives.asymmetric import rsa, padding
+        from cryptography.hazmat.primitives import hashes, serialization
+    except ImportError:
+        print("  (cryptography missing: kick signature test skipped)")
+        return
+    k = rsa.generate_private_key(65537, 2048)
+    pub = kick.parse_public_key(k.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
+    body = json.dumps({"sender": {"username": "v1"}, "content": "KEKW"}).encode()
+    ts = _t.strftime("%Y-%m-%dT%H:%M:%SZ", _t.gmtime())
+    sig = base64.b64encode(k.sign(f"m1.{ts}.".encode() + body, padding.PKCS1v15(), hashes.SHA256())).decode()
+    H = {"Kick-Event-Message-Id": "m1", "Kick-Event-Message-Timestamp": ts, "Kick-Event-Signature": sig, "Kick-Event-Type": "chat.message.sent"}
+    got = []
+    assert kick.handle(H, body, pub, lambda *a: got.append(a))[0] == 200 and got[0][1:] == ("v1", "KEKW")
+    assert kick.handle(H, body + b"x", pub, lambda *a: None)[0] == 401              # tampered
+    assert kick.handle(H, body, pub, lambda *a: None, now=_t.time() + 3600)[0] == 401  # replay
+    assert kick.handle({}, body, pub, lambda *a: None)[0] == 401                    # unsigned
+    wrapped = json.dumps({"data": {"public_key": k.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo).decode()}})
+    assert kick.parse_public_key(json.loads(wrapped)["data"]["public_key"]) == pub
+
+
 def check_live_stt(tmp):
     """LiveTranscriber with a stand-in model: words get stream PTS, the overlap segment is never emitted twice."""
     tmp = Path(tmp)
@@ -213,7 +250,7 @@ def check_render_extras(tmp):
     fake.chmod(0o755)
     small = probe(tmp / "s.mp4")
     upscale.TOOL = str(fake)
-    c3 = {"id": 23, "final_start": 0.0, "final_end": 2.0, "caption": {"style": "none"}, "layout": "fill", "focus_auto": [[[0, .5]]], "split_auto": None}
+    c3 = {"id": 23, "final_start": 0.0, "final_end": 2.0, "caption": {"style": "none"}, "layout": "fill", "focus_auto": [[[0, .5]]], "split_auto": None, "upscale": "ai"}
     o3 = R.render_clip(tmp / "s.mp4", c3, tmp / "x3", words, small)
     ups = list((tmp / "x3").glob("up_*.mp4"))
     assert ups and probe(ups[0])["width"] == 1280 and c3["warn"] == [] and not R.qc(o3, c3)[0]
@@ -221,6 +258,10 @@ def check_render_extras(tmp):
     c4 = {**c3, "id": 24}
     R.render_clip(tmp / "s.mp4", c4, tmp / "x3", words, small)
     assert c4["warn"] == ["low_res_source"], c4["warn"]          # no binary: lanczos + honest warning
+    upscale.TOOL = str(fake)
+    c5 = {**c3, "id": 25, "upscale": "auto"}
+    R.render_clip(tmp / "s.mp4", c5, tmp / "x3", words, small)
+    assert c5["warn"] == ["low_res_source"], "AI upscaling must never run unless asked for"
 
 
 def check_llm(tmp):
@@ -253,7 +294,7 @@ def check_e2e(tmp):
     vid = tmp / "t.mp4"
     subprocess.run([ffmpeg(), "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc=size=1280x720:rate=25", "-f", "lavfi", "-i", "sine=f=300",
                     "-t", "150", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", vid], check=True)
-    words = gen([f"This is sentence number {i} and it keeps going for a bit." for i in range(26)] + ["Wow."], pause=1.0)
+    words = gen([f"This is sentence number {i} and it keeps going for a bit." for i in range(22)] + ["Wow."], pause=0.8)
     (tmp / "words.json").write_text(json.dumps({"words": words}))
     j = J.create(str(vid), tmp / "jobs", clips=3, mode="disabled", transcript=str(tmp / "words.json"), profile="podcast")
     assert J.run(j, "qc", log=lambda *_: None) is None
@@ -344,7 +385,7 @@ def check_server(tmp):
 def main():
     with tempfile.TemporaryDirectory() as d:
         for name, fn in [("boundaries", check_boundaries), ("signals", check_signals), ("captions", check_captions), ("edit rules", check_edit_rules), ("bench", check_bench),
-                         ("phase2 pure", check_phase2_pure), ("critics", lambda: check_critics(d)), ("llm", lambda: check_llm(d + "/c")), ("e2e", lambda: check_e2e(d)), ("render extras", lambda: check_render_extras(d)), ("live stt", lambda: check_live_stt(d)), ("server", lambda: check_server(d))]:
+                         ("phase2 pure", check_phase2_pure), ("critics", lambda: check_critics(d)), ("llm", lambda: check_llm(d + "/c")), ("e2e", lambda: check_e2e(d)), ("render extras", lambda: check_render_extras(d)), ("speaker logic", check_speaker_logic), ("kick", check_kick), ("live stt", lambda: check_live_stt(d)), ("server", lambda: check_server(d))]:
             fn()
             print("ok ", name)
     print("All checks passed")

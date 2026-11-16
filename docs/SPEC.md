@@ -34,7 +34,33 @@ Chat spikes use rolling median + 6 x MAD, so there is no fixed threshold.
 ### Phase 1 (done)
 Scene-aware per-shot crop (never animates across a cut), motivated punch-in zoom (max one automatic), lanczos+sharpen and `low_res_source` warning, persistent SQLite task queue, MCP (stdio) and HTTP (localhost, token, Host check, argument validation) wrappers, `bench` golden-set scorer. Earlier: ingest, chunked resumable Whisper, signal fusion, boundary engine, LLM judge with budget/cache, 4 caption presets, fill/fit layouts, loudness, QC, edit ops, live buffer + Twitch chat/audio spikes.
 
-### Phase 2 (done, with honest verification status)
+### Validation on real footage (phase 3)
+Sources: two 3-minute slices of a public-domain US-government panel (two people on stage, audience cutaways, AV1) and a public-domain NASA ISS interview
+(720p60). Transcripts by faster-whisper `small`, labels from reading the transcript and the contact sheets. The YouTube link you sent could not be fetched from
+this sandbox (YouTube answered with a sign-in/bot check; the tool correctly reported `auth_required`, and I did not try to get around it: pass your own `--cookies`).
+
+| What | Result |
+|---|---|
+| Real pipeline (ingest, Whisper, signals, select, render, QC, polish) on real video | runs; bugs found and fixed: OpenCV 5 dropped `CascadeClassifier` (face detector replaced by YuNet ONNX), numpy floats broke `jsave`, `-c copy` slices misalign video and transcript, a clip planned past the media end, words selected by end time pulled in the next sentence's first word |
+| **Active speaker** (voice d-vectors via resemblyzer + mouth motion; TalkNet is NOT used) | whole-video map: **100% (154/154)** and **99% (141/142)** of speech windows put on the correct person on two 3-minute scenes; the reliability gate (k=2 silhouette >= 0.3 and smaller cluster >= 20%) accepts both and **refuses all 6** single-speaker stretches. Thresholds come from only these 8 cases of one event: treat as calibrated, not proven |
+| Why the design pools the whole video | clip-length spans scored 46-85% with every confidence signal I tried (cluster separation, split-half agreement, permutation test, MFCC features): none separated real from single-speaker cases. Only neural speaker embeddings did (silhouette 0.47-0.54 for two speakers vs 0.07-0.20 for one) |
+| Framing | crop follows the speaker with a min dwell, never moves across a scene cut; fixed an off-centre crop bug (face x was used as crop offset); checked frames by eye |
+| PANNs sound events | model downloaded and run on real audio: tags audience chuckling after a joke ("Chuckle, chortle" was missing from my label set; added) |
+| RapidOCR | reads on-screen text from real frames ("WH.GOV") |
+| YOLO | ran, found both stage people, but is not needed (YuNet does the work): dependency removed |
+| Live: MediaMTX + real RTMP push + `monitor` + chat relay | recording, event detection, preliminary clip all work. A loud beep in the stream and a chat burst at the same instant showed **+7 s chat-vs-video skew**; `clipper sync-check` measured it, feeding it back as `--latency 7` gave **0 s**. Monitor open-retry and stream-clock offset (median of wall-minus-media) fixed along the way |
+| Kick | official webhook receiver with RSA signature verification (stdlib), checked against an independent signer and against Kick's REAL public key (RSA-2048 parsed). Kick delivering a live event to a public URL: NOT tested (needs your registered app). The unofficial Pusher socket was not shipped: its app key was rejected |
+| AI upscaling | Real-ESRGAN ncnn ran on CPU through a software Vulkan driver. **`realesr-animevideov3` redraws real faces as cartoons; `realesrgan-x4plus` produced scrambled tiles there.** AI upscaling is therefore opt-in (`--upscale ai`), default is lanczos + sharpen with a `low_res_source` warning. 562 s for 4 s of 360p on CPU: needs a GPU in practice |
+| RIFE | ran on real footage: clean in-between frames on a talking head (modest motion), 24 -> 48 fps, duration and audio preserved. Opt-in (`edit --interpolate`) |
+| Video2X | not integrated: its release is a wrapper around the same ncnn models, so it adds no capability; I did not run it |
+| Golden set (`golden/`, run `golden/fetch.sh` then `clipper bench golden/golden.json`) | 6 human-labelled reference clips. Local-only selection: recall 1.0 and 0.67, mean start error 5.6 s and 6.6 s. Known misses: the campus free-speech answer was never a candidate; "vocational school" clip starts after its setup sentence. An LLM pass (`--mode quality`) is untested here (no key) |
+| Editor-critic on the real plan | found real problems: dependent openings, mid-clip dead air, a false "ends mid-thought" (a renderer/critic bug that I fixed) |
+
+### Still not done
+TalkNet itself (replaced by the method above), a proven Kick live delivery, Video2X, AI upscaling that is safe for real faces, OpenAI judging on real data, YOLO-based tracking (removed), a golden set beyond one event.
+
+### Earlier phase-2 table (original plan status)
+
 | item | status | verified here |
 |---|---|---|
 | Editor-critic (cut, story, pace, captions, framing, frames, audio, vision; Murch-weighted verdict; `critique` / `fix` / `polish`) | built | yes, on bad fixtures and real renders |

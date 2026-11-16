@@ -4,3 +4,9 @@ clipper-jobs/
 live-out/
 .venv/
 *.egg-info/
+golden/media/
+clipper-bench/
+_ref/
+*.part
+*.crt
+*.key

@@ -11,6 +11,7 @@ HELP = {
     "signals": ("audio/visual/speech/chat series", "pass --chat chat.jsonl when you have chat"),
     "candidates": ("fuse signals, snap boundaries, dedupe", ""),
     "select": ("LLM-judge borderline candidates, write plan.json", "REVIEW plan.json with the user; fix with `clipper edit`"),
+    "speakers": ("whole-video active-speaker map (cached)", "--speakers off to skip"),
     "render": ("ffmpeg per clip (cached per clip)", "use --draft for a quick 540x960 look first"),
     "qc": ("boundary/size/audio/black-frame/decode checks", "fix every issue via `clipper edit`, then `clipper render`"),
 }
@@ -25,7 +26,7 @@ def get(a):
 
 def cmd_process(a):
     j = J.create(a.src, ROOT, clips=a.clips, profile=a.profile, mode=a.mode, style=a.style, model=a.model, chat=a.chat,
-                 max_calls=a.max_calls, max_tokens=a.max_tokens, cookies=a.cookies, transcript=a.transcript, upscale=a.upscale, draft=a.draft or None)
+                 max_calls=a.max_calls, max_tokens=a.max_tokens, cookies=a.cookies, transcript=a.transcript, upscale=a.upscale, speakers=a.speakers, draft=a.draft or None)
     if a.force_from:
         j.invalidate(a.force_from)
     nxt = J.run(j, a.stop_after)
@@ -71,7 +72,7 @@ def cmd_edit(a):
     ops = {k: v for k, v in dict(
         start_shift=a.start_shift, end_shift=a.end_shift, captions=a.captions, caption_scale=a.caption_scale, zoom=a.zoom, layout=a.layout,
         focus_x=a.focus_x, drop=a.drop or None, broll_dir=a.broll_dir, no_broll=a.no_broll or None, music=a.music, music_db=a.music_db,
-        audio=a.audio, upscale=a.upscale, zooms_clear=a.no_zooms or None).items() if v is not None}
+        audio=a.audio, upscale=a.upscale, interpolate=a.interpolate or None, zooms_clear=a.no_zooms or None).items() if v is not None}
     if a.zoom_at is not None:
         ops["zoom_add"] = {"t": a.zoom_at, "dur": a.zoom_for, "amt": a.zoom_amt}
     c = J.edit_clip(j, a.clip, ops)
@@ -112,12 +113,16 @@ def cmd_monitor(a):
     cs = live.chat_source(a.src, a.channel, a.chat_file)
     if not cs:
         print("no chat adapter for this source: audio (+ speech) spikes only. Twitch: automatic. YouTube: set YOUTUBE_API_KEY. Kick/others: --chat-file relay.jsonl")
-    live.monitor(a.src, a.out, cs, a.latency, not a.no_record, max_seconds=a.max_seconds, stt=not a.no_stt)
+    live.monitor(a.src, a.out, cs, a.latency, not a.no_record, max_seconds=a.max_seconds, stt=not a.no_stt, warmup=a.warmup_bins, pre=a.pre, post=a.post)
 
 
 def cmd_doctor(a):
-    def has_mod(m):
-        return importlib.util.find_spec(m) is not None
+    def has_mod(m):  # really import: a package can be installed yet broken (e.g. opencv without libGL)
+        try:
+            importlib.import_module(m)
+            return True
+        except Exception:
+            return False
     try:
         ff = ffmpeg()
     except SystemExit:
@@ -126,11 +131,11 @@ def cmd_doctor(a):
             ("yt-dlp", bool(shutil.which("yt-dlp")), "pip install yt-dlp  (URL sources)"),
             ("faster-whisper", has_mod("faster_whisper"), "pip install faster-whisper  (or pass --transcript; also enables live speech)"),
             ("panns-inference (sound events)", has_mod("panns_inference"), "pip install panns-inference  (optional: laughter/cheering signal)"),
-            ("ultralytics (people tracking)", has_mod("ultralytics"), "pip install ultralytics  (optional; else OpenCV faces)"),
+            ("resemblyzer (who is speaking)", has_mod("resemblyzer"), "pip install resemblyzer  (optional: active-speaker following)"),
             ("rapidocr (on-screen text)", has_mod("rapidocr_onnxruntime"), "pip install rapidocr-onnxruntime  (optional)"),
             ("Real-ESRGAN upscaler", bool(shutil.which("realesrgan-ncnn-vulkan")), "optional: realesrgan-ncnn-vulkan on PATH for low-res sources"),
             ("YOUTUBE_API_KEY (live chat)", bool(os.environ.get("YOUTUBE_API_KEY")), "optional: your own free YouTube Data API key"),
-            ("opencv (face focus)", has_mod("cv2"), "pip install opencv-python-headless  (optional; else centre crop)"),
+            ("opencv (faces)", has_mod("cv2"), "pip install opencv-python-headless; if import fails with libGL: pip uninstall opencv-python && pip install --force-reinstall opencv-python-headless"),
             ("streamlink", bool(shutil.which("streamlink")), "pip install streamlink  (optional; yt-dlp -g is the fallback)"),
             ("nvidia GPU", bool(shutil.which("nvidia-smi")), "optional; CPU uses int8 small model"),
             ("OPENAI_API_KEY", bool(os.environ.get("OPENAI_API_KEY")), "optional; without it everything runs locally")]
@@ -219,6 +224,28 @@ def cmd_mcp(a):
     server.mcp()
 
 
+def cmd_ingest_server(a):
+    from . import ingest_server
+    p = ingest_server.start(a.port, {"MTX_RTMPADDRESS": f"{a.bind}:{a.port}"})
+    print(f"RTMP ingest on {a.bind}:{a.port}. Push to rtmp://<host>:{a.port}/live/<key>, then: clipper monitor rtmp://127.0.0.1:{a.port}/live/<key>", flush=True)
+    try:
+        p.wait()
+    except KeyboardInterrupt:
+        p.terminate()
+
+
+def cmd_kick_relay(a):
+    from . import kick
+    kick.serve(a.port, a.out)
+
+
+def cmd_sync_check(a):
+    from . import live
+    skew, ct, at = live.sync_check(a.out)
+    print(f"busiest chat second t={ct}s, loudest audio second t={at}s: chat is {skew:+d}s {'later' if skew > 0 else 'earlier'} than the video.\n"
+          f"Re-run monitor with --latency <current {'+' if skew > 0 else ''}{skew}> (only meaningful if that loud moment is what chat reacted to).")
+
+
 def cmd_selftest(a):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from tests import selftest
@@ -238,7 +265,8 @@ def main(argv=None):
     s.add_argument("--chat"), s.add_argument("--cookies"), s.add_argument("--transcript")
     s.add_argument("--draft", action="store_true"), s.add_argument("--stop-after", default="qc", choices=J.STAGES)
     s.add_argument("--force-from", choices=J.STAGES)
-    s.add_argument("--upscale", choices=["auto", "off"], help="auto: Real-ESRGAN for low-res sources if installed")
+    s.add_argument("--speakers", choices=["auto", "off"], help="whole-video active-speaker map (needs opencv); off = skip")
+    s.add_argument("--upscale", choices=["auto", "ai", "off"], help="auto: lanczos+sharpen (default). ai: Real-ESRGAN, opt-in, check a frame: the default model cartoonises real faces")
     s.add_argument("--max-calls", type=int), s.add_argument("--max-tokens", type=int)
     s.set_defaults(f=cmd_process)
     for n, f in (("status", cmd_status), ("next", cmd_next)):
@@ -254,7 +282,7 @@ def main(argv=None):
     s.add_argument("--no-zooms", action="store_true")
     s.add_argument("--broll-dir", help="folder of images/videos named after spoken keywords (pizza.png)"), s.add_argument("--no-broll", action="store_true")
     s.add_argument("--music", help="your own royalty-cleared track; ducked under speech"), s.add_argument("--music-db", type=float, default=-22.0)
-    s.add_argument("--audio", choices=["clean", "raw"], help="clean = high-pass + denoise"), s.add_argument("--upscale", choices=["auto", "off"])
+    s.add_argument("--interpolate", action="store_true", help="2x frames with RIFE (opt-in; look at a frame)"), s.add_argument("--audio", choices=["clean", "raw"], help="clean = high-pass + denoise"), s.add_argument("--upscale", choices=["auto", "ai", "off"])
     s.set_defaults(f=cmd_edit)
     s = sp.add_parser("render")
     s.add_argument("job"), s.add_argument("--draft", action=argparse.BooleanOptionalAction, default=None)
@@ -265,6 +293,7 @@ def main(argv=None):
     s = sp.add_parser("monitor", help="watch a live stream, record it, emit preliminary clips")
     s.add_argument("src"), s.add_argument("--out", default="live-out"), s.add_argument("--channel"), s.add_argument("--chat-file")
     s.add_argument("--latency", type=float, default=8.0, help="chat-vs-video delay in seconds"), s.add_argument("--no-record", action="store_true")
+    s.add_argument("--warmup-bins", type=int, default=10, help="baseline history (10 s bins) before spikes can fire"), s.add_argument("--pre", type=float, default=120), s.add_argument("--post", type=float, default=60)
     s.add_argument("--max-seconds", type=float), s.add_argument("--no-stt", action="store_true", help="skip live speech transcription")
     s.set_defaults(f=cmd_monitor)
     s = sp.add_parser("critique", help="editor-critic review of the real files (auto critics, or --packet/--submit/--unavailable for the vision critic)")
@@ -280,6 +309,15 @@ def main(argv=None):
     s.add_argument("--port", type=int, default=8765)
     s.set_defaults(f=cmd_serve)
     sp.add_parser("mcp", help="MCP server over stdio").set_defaults(f=cmd_mcp)
+    s = sp.add_parser("ingest-server", help="local RTMP ingest (MediaMTX) for OBS/ffmpeg pushes")
+    s.add_argument("--port", type=int, default=1935), s.add_argument("--bind", default="127.0.0.1", help="use 0.0.0.0 only on a trusted network")
+    s.set_defaults(f=cmd_ingest_server)
+    s = sp.add_parser("kick-relay", help="receive Kick's official chat webhooks (signature-verified) into a jsonl for monitor --chat-file")
+    s.add_argument("--port", type=int, default=8787), s.add_argument("--out", default="kick-chat.jsonl")
+    s.set_defaults(f=cmd_kick_relay)
+    s = sp.add_parser("sync-check", help="measure chat-vs-video skew from a finished monitor run")
+    s.add_argument("out", help="the monitor --out folder")
+    s.set_defaults(f=cmd_sync_check)
     sp.add_parser("doctor").set_defaults(f=cmd_doctor)
     sp.add_parser("selftest").set_defaults(f=cmd_selftest)
     a = p.parse_args(argv)

@@ -2,7 +2,7 @@
 re-renders only that clip and a crash never re-renders finished ones."""
 import os, re, shutil, sys
 from pathlib import Path
-from . import captions, extras, upscale
+from . import captions, extras, speaker, upscale
 from .util import digest, ffmpeg, probe, run, jsave
 
 W, H = 1080, 1920
@@ -17,47 +17,25 @@ def encoder():
     return "h264_videotoolbox" if sys.platform == "darwin" else "libx264"
 
 
-_DET = []
-
-
-def detector():
-    """frame -> [(x 0..1, relative size)]. YOLOv8 people if ultralytics is installed, else OpenCV Haar faces, else None.
-    UNVERIFIED for YOLO without its weights; Haar path is exercised only where OpenCV exists."""
-    if _DET:
-        return _DET[0]
-    fn = None
+def shot_framing(src, a, b, s, spk=None):
+    """Crop keyframes [(t_rel_to_clip, x)] for ONE shot [a,b] plus the people seen as [(x,size)] per frame.
+    Whole-video speaker map reliable -> follow the active speaker (min dwell before switching). Otherwise: one person gets a smoothed
+    follow; two or more with an unknown speaker keep the centre (plan_framing may then stack both). Needs OpenCV; else centre."""
+    if spk and spk.get("reliable"):
+        kf = speaker.keyframes_from_timeline(spk, a, b, s)
+        if kf:
+            if kf[0][0] > a - s:
+                kf.insert(0, (round(a - s, 2), kf[0][1]))
+            return kf, []
     try:
-        import cv2
-        try:
-            from ultralytics import YOLO
-            m = YOLO("yolov8n.pt")
-            fn = lambda fr: [(float((b[0] + b[2]) / 2 / fr.shape[1]), float((b[2] - b[0]) * (b[3] - b[1]) / (fr.shape[0] * fr.shape[1])))
-                             for b in m(fr, verbose=False, classes=[0])[0].boxes.xyxy.tolist()]
-        except Exception:
-            cas = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-            fn = lambda fr: [((x + w / 2) / fr.shape[1], w * h / (fr.shape[0] * fr.shape[1]))
-                             for x, y, w, h in cas.detectMultiScale(cv2.cvtColor(fr, cv2.COLOR_BGR2GRAY), 1.2, 5, minSize=(fr.shape[0] // 12,) * 2)]
+        an = speaker.analyze(src, a, b, fps=6)
     except ImportError:
-        pass
-    _DET.append(fn)
-    return fn
-
-
-def sample_people(src, t0, t1, step=1.0):
-    """[(t_abs, [(x,size)])] every `step` seconds, or [] without a detector."""
-    det = detector()
-    if not det:
-        return []
-    import cv2
-    cap, out, t = cv2.VideoCapture(str(src)), [], t0
-    while t < t1:
-        cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
-        ok, fr = cap.read()
-        if ok:
-            out.append((t, det(fr)))
-        t += step
-    cap.release()
-    return out
+        return [(round(a - s, 2), 0.5)], []
+    keys = speaker.main_tracks(an)
+    frames = [[(t_["x"][i], t_["size"][i]) for t_ in an["tracks"] if t_["x"][i] is not None] for i in range(len(an["t"]))]
+    if len(keys) != 1:
+        return [(round(a - s, 2), 0.5)], frames
+    return extras.smooth_track([(t - s, x) for t, x in zip(an["t"], an["tracks"][keys[0]]["x"])]), frames
 
 
 def shot_cuts(s, e, cuts, min_len=1.5):
@@ -106,15 +84,18 @@ def vfilter(info, layout, fx, ass, zoom, w=W, h=H, zooms=(), sharp=False, split=
     hh = h // 2
     if split:
         cw = f"ih*{w / hh:.4f}"
-        base = (f"[0:v]split[a][b];[a]crop={cw}:ih:'(iw-{cw})*{split[0]:.3f}':0,scale={w}:{hh}:{sc}[t];"
-                f"[b]crop={cw}:ih:'(iw-{cw})*{split[1]:.3f}':0,scale={w}:{hh}:{sc}[u];[t][u]vstack[base]")
+        a = (info["height"] * w / hh) / info["width"]
+        cx = lambda v: f"clip(({v:.3f}-{a / 2:.4f})/{max(1 - a, 0.01):.4f},0,1)"
+        base = (f"[0:v]split[a][b];[a]crop={cw}:ih:'(iw-{cw})*{cx(split[0])}':0,scale={w}:{hh}:{sc}[t];"
+                f"[b]crop={cw}:ih:'(iw-{cw})*{cx(split[1])}':0,scale={w}:{hh}:{sc}[u];[t][u]vstack[base]")
     elif layout == "fit":
         base = (f"[0:v]split[a][b];[a]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},boxblur=30:5[bg];"
                 f"[b]scale={w}:-2:{sc}[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2{z}[base]")
     elif info["width"] / max(1, info["height"]) <= 9 / 16 + 0.01:  # already vertical
         base = f"[0:v]scale={w}:{h}:force_original_aspect_ratio=increase:{sc},crop={w}:{h}{z}[base]"
     else:
-        base = f"[0:v]crop=ih*9/16:ih:'(iw-ih*9/16)*({fx})':0,scale={w}:{h}:{sc}{z}[base]"
+        a = info["height"] * 9 / 16 / info["width"]  # crop width as a share of frame width; fx is where the SUBJECT is (0 left..1 right), so centre the crop on it
+        base = f"[0:v]crop=ih*9/16:ih:'(iw-ih*9/16)*clip((({fx})-{a / 2:.4f})/{1 - a:.4f},0,1)':0,scale={w}:{h}:{sc}{z}[base]"
     cur = "base"
     for i, b in enumerate(broll):  # picture over the upper third while the keyword is spoken
         k = first_extra + i
@@ -139,28 +120,29 @@ def layout_is_fill(clip, info):
     return clip.get("layout", "fill") == "fill" and info["width"] / max(1, info["height"]) > 9 / 16 + 0.01
 
 
-def plan_framing(src, clip, cr, info):
-    """Detect once per clip (cached in the plan, not in the render key): per-shot crop keyframes and, for a steady two-person
-    shot, a split layout. Without a detector: centre crop."""
+def plan_framing(src, clip, cr, info, spk=None):
+    """Detect once per clip (cached in the plan, not in the render key). A steady two-person shot whose speaker could not be
+    decided gets the stacked split so both stay visible."""
     s, e = clip["final_start"], clip["final_end"]
     if clip.get("focus_auto") is not None and len(clip["focus_auto"]) == len(cr) + 1 and "split_auto" in clip:
         return
     edges = [s] + [s + c for c in cr] + [e]
     shots, people = [], []
     for a, b in zip(edges, edges[1:]):
-        smp = sample_people(src, a, b)
-        people += [p for _, p in smp]
-        prim = [(t - s, (max(p, key=lambda d: d[1])[0] if p else None)) for t, p in smp] or [(a - s, None)]
-        shots.append([list(k) for k in extras.smooth_track(prim)])
+        kf, fr = shot_framing(src, a, b, s, spk)
+        shots.append([list(k) for k in kf])
+        people += fr
     clip["focus_auto"] = shots
-    clip["split_auto"] = list(extras.pair_of(people)) if (not cr and people) else None
+    pair = extras.pair_of(people)
+    follows = any(len(kf) > 1 for kf in shots)
+    clip["split_auto"] = list(pair) if (pair and not cr and not follows) else None
 
 
-def render_clip(src, clip, out_dir, words, info, draft=False, force=False, cuts=()):
+def render_clip(src, clip, out_dir, words, info, draft=False, force=False, cuts=(), spk=None):
     """clip: plan entry. cuts: absolute scene-cut times of the source. Returns the output path."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    spec = {k: clip.get(k) for k in ("final_start", "final_end", "caption", "layout", "zoom", "zooms", "focus_x", "id", "broll", "music", "audio", "upscale")}
+    spec = {k: clip.get(k) for k in ("final_start", "final_end", "caption", "layout", "zoom", "zooms", "focus_x", "id", "broll", "music", "audio", "upscale", "interpolate")}
     spec["draft"] = draft
     out = out_dir / f"clip_{clip['id']:02d}{'_draft' if draft else ''}_{digest(spec)}.mp4"
     if out.exists() and not force:
@@ -169,7 +151,7 @@ def render_clip(src, clip, out_dir, words, info, draft=False, force=False, cuts=
         old.unlink()  # stale render of an earlier spec
     s, e = clip["final_start"], clip["final_end"]
     dur = e - s
-    cw = [w for w in words if w["s"] >= s - 0.01 and w["e"] <= e + 0.3]
+    cw = [w for w in words if s - 0.01 <= w["s"] < e - 0.05]  # by START: a word that begins after the cut is not in the clip
     cap = clip.get("caption") or {}
     ass = None
     if cap.get("style", "bold_pop") != "none" and cw:
@@ -180,7 +162,7 @@ def render_clip(src, clip, out_dir, words, info, draft=False, force=False, cuts=
     if clip.get("focus_x") is not None:  # explicit user value wins; auto-detected framing is not part of the cache key
         fx = f"{clip['focus_x']:.3f}"
     else:
-        plan_framing(src, clip, cr, info)
+        plan_framing(src, clip, cr, info, spk)
         fx = crop_expr(clip["focus_auto"], cr)
         if clip.get("layout", "fill") == "fill" and clip.get("split_auto") and layout_is_fill(clip, info):
             split = tuple(clip["split_auto"])
@@ -191,10 +173,14 @@ def render_clip(src, clip, out_dir, words, info, draft=False, force=False, cuts=
     up = (H / info["height"]) if layout_is_fill(clip, info) else (W / max(1, info["width"]))
     low = up >= 1.5
     ss, inp, vinfo = s, os.path.abspath(src), info
-    if low and not draft and clip.get("upscale", "auto") != "off" and upscale.available():
+    if low and not draft and clip.get("upscale", "auto") == "ai" and upscale.available():  # opt-in: see upscale.py
         inp = str(upscale.upscale_clip(src, s, e, out_dir, info["fps"]))
         ss, vinfo = 0.0, probe(inp)
         low = False
+    if clip.get("interpolate") and not draft and upscale.rife_available():
+        a0 = ss if inp == os.path.abspath(src) else 0.0
+        inp = str(upscale.interpolate_clip(inp, a0, a0 + dur, out_dir, vinfo["fps"]))
+        ss, vinfo = 0.0, probe(inp)
     clip["warn"] = ["low_res_source"] if low else []
     enc = encoder()
     q = ["-preset", "veryfast", "-crf", "28"] if draft else (["-preset", "medium", "-crf", "18"] if enc == "libx264" else ["-b:v", "10M"])

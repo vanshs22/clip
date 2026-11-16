@@ -176,7 +176,7 @@ def extract(buf_dir, seg_names, start_idx, end_idx, a, b, out):
     return out if r.returncode == 0 else None
 
 
-def monitor(src, out_dir, chat_src=None, latency=8.0, record=True, log=print, max_seconds=None, stt=True):
+def monitor(src, out_dir, chat_src=None, latency=8.0, record=True, log=print, max_seconds=None, stt=True, warmup=10, pre=PRE, post=POST, open_retries=12):
     out = Path(out_dir)
     buf = out / "buffer"
     shutil.rmtree(buf, ignore_errors=True)
@@ -185,20 +185,40 @@ def monitor(src, out_dir, chat_src=None, latency=8.0, record=True, log=print, ma
            "-map", "0", "-c", "copy", "-f", "segment", "-segment_time", SEG, "-segment_format", "mpegts", str(buf / "seg_%06d.ts")]
     if record:
         cmd += ["-map", "0", "-c", "copy", "-f", "mpegts", str(out / "record.ts")]
-    proc = subprocess.Popen([str(c) for c in cmd])
+    for attempt in range(open_retries + 1):  # a monitor and a stream never start at the same instant
+        proc = subprocess.Popen([str(c) for c in cmd])
+        time.sleep(3)
+        if proc.poll() is None or attempt == open_retries:
+            break
+        log(f"stream not available yet, retrying ({attempt + 1}/{open_retries})")
+        time.sleep(5)
     t0, stop, chat_t, events, done_extract = time.time(), threading.Event(), [], [], set()
     chat_f = open(out / "chat.jsonl", "a")
 
-    def sink(wall, user, text):  # wall clock -> stream PTS. ponytail: assumes ffmpeg start ~ stream t=0; `latency` calibrates chat-vs-video delay
-        t = wall - t0 - latency
-        chat_t.append(t)
-        chat_f.write(json.dumps({"t": round(t, 2), "u": user, "m": text}) + "\n")
+    rows, obs = [], []  # chat is held as wall-clock until the stream clock is known
+
+    def sink(wall, user, text):
+        rows.append((wall, user, text))
+
+    def flush_chat():
+        """wall clock -> stream PTS. Each loop we know the media time `now` of the newest finished segment; wall - now is the clock offset
+        (it includes delivery lag + poll delay). The MEDIAN of recent observations ignores the initial burst of buffered segments that a
+        relay like MediaMTX sends, and `latency` calibrates the chat-vs-video delay the viewers add on top."""
+        if len(obs) < 5:
+            return
+        off = sorted(obs[-15:])[len(obs[-15:]) // 2]
+        while rows:
+            wall, user, text = rows.pop(0)
+            t = wall - off - latency
+            chat_t.append(t)
+            chat_f.write(json.dumps({"t": round(t, 2), "u": user, "m": text}) + "\n")
         chat_f.flush()
     if chat_src:
         threading.Thread(target=chat_src, args=(sink, stop), daemon=True).start()
-    chat_det, aud_det, seen, bin_i = SpikeDetector(60, 6.0, 8), SpikeDetector(60, 4.0, 1), set(), 0
+    keep = max(KEEP, pre + post + 2 * BIN)
+    chat_det, aud_det, seen, bin_i = SpikeDetector(60, 6.0, 8, warmup), SpikeDetector(60, 4.0, 1, warmup), set(), 0
     lt = LiveTranscriber(buf) if stt and importlib.util.find_spec("faster_whisper") else None
-    sp_det, spbin, sp_f = SpikeDetector(60, 5.0, 3), {}, open(out / "live-transcript.jsonl", "a")
+    sp_det, spbin, sp_f = SpikeDetector(60, 5.0, 3, warmup), {}, open(out / "live-transcript.jsonl", "a")
     if stt and not lt:
         log("live speech: faster-whisper not installed, skipping (chat + audio only)")
     try:
@@ -219,6 +239,8 @@ def monitor(src, out_dir, chat_src=None, latency=8.0, record=True, log=print, ma
                 sp_f.write(json.dumps(w) + "\n")
             sp_f.flush()
             now = (len(seen)) * SEG
+            obs.append(time.time() - now)
+            flush_chat()
             while (bin_i + 1) * BIN <= now:  # complete chat bins
                 c = sum(1 for t in chat_t if bin_i * BIN <= t < (bin_i + 1) * BIN)
                 if chat_det.feed(c):
@@ -226,19 +248,40 @@ def monitor(src, out_dir, chat_src=None, latency=8.0, record=True, log=print, ma
                 if lt and sp_det.feed(spbin.pop(bin_i, 0.0)):
                     events.append({"pts": bin_i * BIN, "kind": "speech", "x": 0})
                 bin_i += 1
-            for w in merge_events(events):
+            for w in merge_events(events, pre, post):
                 key = round(w["start"])
                 if w["end"] <= now and key not in done_extract:
                     done_extract.add(key)
                     f = extract(buf, segs, int(w["start"] // SEG), int(w["end"] // SEG), w["start"], w["end"], out / f"prelim_{hms(w['start']).replace(':', '-')}.mkv")
                     log(f"event {hms(w['start'])}-{hms(w['end'])} {w['kinds']} conf={w['confidence']} -> {f}")
             for n in segs:  # rolling retention
-                if int(n[4:10]) * SEG < now - KEEP:
+                if int(n[4:10]) * SEG < now - keep:
                     (buf / n).unlink(missing_ok=True)
-            (out / "events.json").write_text(json.dumps(merge_events(events), indent=1))
+            (out / "events.json").write_text(json.dumps(merge_events(events, pre, post), indent=1))
     finally:
         stop.set()
         proc.terminate()
         chat_f.close()
         sp_f.close()
     log(f"stopped. Next: clipper process {out / 'record.ts'} --chat {out / 'chat.jsonl'}")
+
+
+def sync_check(out_dir, radius=25):
+    """Measure chat-vs-video skew from a finished `monitor` run: the busiest chat second vs the loudest audio second within `radius` s.
+    -> (skew_seconds, chat_t, audio_t). skew > 0 means chat sits LATER than the video: re-run monitor with --latency <current + skew>.
+    Needs one clearly loud moment the audience reacted to (a goal, a scream) and a recording."""
+    from .signals import audio_rms
+    from .util import probe
+    out = Path(out_dir)
+    chat = [json.loads(x) for x in open(out / "chat.jsonl")]
+    per = {}
+    for c in chat:
+        per[int(c["t"])] = per.get(int(c["t"]), 0) + 1
+    if not per:
+        raise SystemExit("no chat recorded")
+    ct = max(per, key=per.get)
+    rec = out / "record.ts"
+    rms = audio_rms(str(rec), probe(str(rec))["duration"])
+    lo, hi = max(0, ct - radius), min(len(rms), ct + radius)
+    at = max(range(lo, hi), key=lambda i: rms[i])
+    return ct - at, ct, at

@@ -30,7 +30,7 @@ class Ctx:
         self.profile = j.opts.get("profile", "auto")
 
     def cw(self, c):
-        return [w for w in self.words if w["s"] >= c["final_start"] - 0.01 and w["e"] <= c["final_end"] + 0.3]
+        return [w for w in self.words if c["final_start"] - 0.01 <= w["s"] < c["final_end"] - 0.05]  # by START: a word that begins after the cut is not in the clip
 
     def sent_idx(self, t):
         return next((k for k, (a, b) in enumerate(self.sents) if self.words[a]["s"] <= t <= self.words[b]["e"] + 0.05), None)
@@ -226,7 +226,7 @@ def framing(x, R_):
         if "low_res_source" in (c.get("warn") or []):
             R_.add(c, "major" if x.src["info"]["height"] < 540 else "minor", "low_res_source",
                    f"Source is {x.src['info']['height']}p: upscaled to 1080x1920 it will look soft", f"source height {x.src['info']['height']}",
-                   "native 1080p or AI upscaling", "install Real-ESRGAN (realesrgan-ncnn-vulkan) or accept softness; say so to the user",
+                   "native 1080p", "get a higher-resolution source; `--upscale ai` exists but its default model redraws faces as cartoons: only use it after looking at a frame. Tell the user",
                    "You cannot cut your way out of missing pixels.", target="source")
 
 

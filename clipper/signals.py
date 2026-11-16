@@ -70,13 +70,13 @@ class SpikeDetector:
     """Adaptive baseline: median + k*MAD over a rolling window. Not a fixed threshold.
     A spike is a CANDIDATE, never proof of a good clip."""
 
-    def __init__(self, window=60, k=6.0, min_abs=6.0):
-        self.hist, self.window, self.k, self.min_abs = [], window, k, min_abs
+    def __init__(self, window=60, k=6.0, min_abs=6.0, warmup=10):
+        self.hist, self.window, self.k, self.min_abs, self.warmup = [], window, k, min_abs, warmup
 
     def feed(self, x):
         h = self.hist[-self.window:]
         hit = False
-        if len(h) >= 10:
+        if len(h) >= self.warmup:
             thr = median(h) + self.k * max(1.4826 * mad(h), 1.0)
             hit = x >= thr and x >= self.min_abs
         self.hist.append(x)
@@ -92,7 +92,7 @@ def spikes(series, **kw):
 import subprocess
 from .util import percentile_rank
 
-EVENT_LABELS = {"Laughter", "Giggle", "Belly laugh", "Applause", "Cheering", "Crowd", "Screaming", "Shout", "Yell", "Whoop", "Explosion", "Gunshot, gunfire"}
+EVENT_LABELS = {"Laughter", "Giggle", "Snicker", "Chuckle, chortle", "Belly laugh", "Applause", "Cheering", "Crowd", "Screaming", "Shout", "Yell", "Whoop", "Explosion", "Gunshot, gunfire"}
 OCR_WORDS = re.compile(r"\b(victory|defeat|win(ner)?|kill(s|ed)?|goal|score[sd]?|ace|clutch|gg|round|knockout|k\.?o\.?|final|eliminated|checkmate|epic|new record)\b", re.I)
 
 
@@ -123,13 +123,17 @@ def event_scores(rows, labels, wanted=EVENT_LABELS):
 
 def audio_events(path, duration, win=5, batch=48):
     """Sound events (laughter, cheering, applause, screams...) with PANNs. Returns [] if panns-inference/numpy are missing.
-    UNVERIFIED without the model weights (~300 MB download on first use): see docs/SPEC.md."""
+    Verified on real audio (it tagged audience chuckling after a joke)."""
     try:
         import numpy as np
         from panns_inference import AudioTagging, labels
     except ImportError:
         return []
-    tagger = AudioTagging(checkpoint_path=None, device="cuda" if __import__("shutil").which("nvidia-smi") else "cpu")
+    try:  # panns-inference downloads ~330 MB into ~/panns_data; a read-only HOME must not kill the job
+        tagger = AudioTagging(checkpoint_path=None, device="cuda" if __import__("shutil").which("nvidia-smi") else "cpu")
+    except OSError as e:
+        print(f"sound events skipped: {e} (set HOME to a writable folder)")
+        return []
     p = subprocess.Popen([ffmpeg(), "-v", "error", "-i", path, "-vn", "-ac", "1", "-ar", "32000", "-f", "f32le", "-"], stdout=subprocess.PIPE)
     n, out = win * 32000 * 4, []
     while True:
@@ -150,7 +154,7 @@ def audio_events(path, duration, win=5, batch=48):
 
 def ocr_series(path, duration, every=5):
     """On-screen text events (scoreboards, 'VICTORY', kill feeds) via RapidOCR on 1 frame / `every` s.
-    Score = keyword hits + a little for text that changed. Returns [] if rapidocr is missing. UNVERIFIED without the model."""
+    Score = keyword hits + a little for text that changed. Returns [] if rapidocr is missing. Verified: reads on-screen text from real frames."""
     try:
         from rapidocr_onnxruntime import RapidOCR
     except ImportError:

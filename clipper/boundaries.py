@@ -53,7 +53,10 @@ def refine(words, i0, i1, sents=None, setup=MAX_SETUP_SENT, min_s=MIN_S, max_s=M
         first = words[a]["w"].lower().strip(".,!?\"'")
         lower = words[a]["w"][:1].islower()
         prev_b = sents[c0 - 1][1]
-        close = words[a]["s"] - words[prev_b]["e"] < 2.0
+        gap = words[a]["s"] - words[prev_b]["e"]
+        # a dependent line right after a SHORT line is a reply/quip to it (e.g. "Don't run for president." / "But we're glad you did."): keep the pair
+        # even across a long pause; otherwise only pull across a short one
+        close = gap < 2.0 or (gap < 6.0 and sents[c0 - 1][1] - sents[c0 - 1][0] < 8)
         if (first in DEPENDENT or lower) and close and words[sents[s0][0]]["s"] - words[sents[c0 - 1][0]]["s"] <= MAX_SETUP_S:
             c0 -= 1
         else:

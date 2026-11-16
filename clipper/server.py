@@ -26,7 +26,7 @@ TOOLS = {
                   "caption_scale": ("float", None), "zoom": ("float", None), "zoom_at": ("float", None), "zoom_for": ("float", None),
                   "zoom_amt": ("float", None), "no_zooms": ("bool", None), "layout": ("str", ["fill", "fit"]), "focus_x": ("float", None),
                   "drop": ("bool", None), "broll_dir": ("path", None), "no_broll": ("bool", None), "music": ("path", None),
-                  "music_db": ("float", None), "audio": ("str", ["clean", "raw"]), "upscale": ("str", ["auto", "off"])}, "sync",
+                  "music_db": ("float", None), "audio": ("str", ["clean", "raw"]), "upscale": ("str", ["auto", "ai", "off"]), "interpolate": ("bool", None)}, "sync",
                   "Structured edit of one clip; only that clip re-renders."),
     "critique_clips": (["critique"], ["job"], {"packet": ("bool", None), "submit": ("path", None), "unavailable": ("str", None)}, "sync",
                        "Editor-critic review of the rendered clips (cut, story, pace, captions, framing, frames, audio). packet=true makes contact sheets for the vision critic; submit=findings file."),

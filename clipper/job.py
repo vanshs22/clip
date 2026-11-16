@@ -5,11 +5,11 @@ from pathlib import Path
 from . import ingest, llm, render as R, score, signals as S, transcribe as T
 from .util import digest, hms, jload, jsave, probe
 
-STAGES = ["ingest", "transcribe", "signals", "candidates", "select", "render", "qc"]
+STAGES = ["ingest", "transcribe", "signals", "candidates", "select", "speakers", "render", "qc"]
 ART = {"ingest": "source.json", "transcribe": "transcript.json", "signals": "signals.json", "candidates": "candidates.json",
-       "select": "plan.json", "render": "render.json", "qc": "report.json"}
+       "select": "plan.json", "speakers": "speakers.json", "render": "render.json", "qc": "report.json"}
 DEFAULTS = {"clips": 10, "profile": "auto", "mode": "smart", "style": "bold_pop", "model": "balanced", "chat": None,
-            "cookies": None, "transcript": None, "draft": False, "upscale": "auto", "max_calls": 6, "max_tokens": 60000}
+            "cookies": None, "transcript": None, "draft": False, "upscale": "auto", "speakers": "auto", "max_calls": 6, "max_tokens": 60000}
 
 
 class Job:
@@ -63,7 +63,7 @@ def run(j, stop_after="qc", log=print):
 
 
 EDIT_KEYS = {"start_shift", "end_shift", "captions", "caption_scale", "zoom", "layout", "focus_x", "drop", "broll_dir", "no_broll", "music",
-             "music_db", "audio", "upscale", "zooms_clear", "zoom_add"}
+             "music_db", "audio", "upscale", "interpolate", "zooms_clear", "zoom_add"}
 
 
 def edit_clip(j, cid, ops):
@@ -90,7 +90,7 @@ def edit_clip(j, cid, ops):
         c.setdefault("zooms", []).append(ops["zoom_add"])
     if ops.get("zooms_clear"):
         c["zooms"] = []
-    for k in ("layout", "focus_x", "audio", "upscale"):
+    for k in ("layout", "focus_x", "audio", "upscale", "interpolate"):
         if k in ops:
             c[k] = ops[k]
     if "broll_dir" in ops:
@@ -158,6 +158,11 @@ def _candidates(j, o):
 def _select(j, o):
     words, cs = jload(j.p("transcript.json"))["words"], jload(j.p("candidates.json"))["candidates"]
     top, cost = llm.select(words, cs, o["clips"], o["mode"], j.p("cache", "llm"), llm.Budget(o["max_calls"], o["max_tokens"]))
+    dur = jload(j.p("source.json"))["info"]["duration"]
+    for c in top:  # transcripts can run past the media (rounding, a trimmed file): never plan beyond what exists
+        c["final_end"] = round(min(c["final_end"], dur), 3)
+        if c["final_end"] - c["final_start"] < 3:
+            c["issues"] = list(c.get("issues", [])) + ["clipped_by_media_end"]
     layout = score.PROFILES.get(o["profile"], score.PROFILES["auto"])["layout"]
     clips = [{**c, "id": i + 1, "caption": {"style": o["style"], "scale": 1.0}, "layout": layout, "zoom": None, "focus_x": None, "upscale": o["upscale"],
               "zooms": auto_zoom(c, layout)} for i, c in enumerate(top)]
@@ -171,15 +176,29 @@ def auto_zoom(c, layout):
     return [{"t": round(t, 2), "dur": 2.0, "amt": 1.12}] if ok else []
 
 
+def _speakers(j, o):
+    """Whole-video active-speaker map (optional: off for single-speaker sources and when OpenCV is missing)."""
+    src, words = jload(j.p("source.json")), jload(j.p("transcript.json"))["words"]
+    spk = {"reliable": False, "reason": "off"}
+    if o["speakers"] != "off" and src["info"]["width"] and o["profile"] not in ("gaming", "sports"):
+        try:
+            from . import speaker
+            spk = speaker.timeline(src["path"], words, src["info"]["duration"])
+        except ImportError:
+            spk = {"reliable": False, "reason": "opencv/numpy not installed"}
+    jsave(j.p("speakers.json"), spk)
+
+
 def _render(j, o):
     src, words, plan = jload(j.p("source.json")), jload(j.p("transcript.json"))["words"], jload(j.p("plan.json"))
     cuts = (jload(j.p("signals.json")) or {}).get("cuts", [])
+    spk = jload(j.p("speakers.json"))
     out, log = {}, []
     for c in plan["clips"]:
         if c.get("dropped"):
             continue
         try:
-            out[c["id"]] = str(R.render_clip(src["path"], c, j.p("renders"), words, src["info"], o["draft"], cuts=cuts))
+            out[c["id"]] = str(R.render_clip(src["path"], c, j.p("renders"), words, src["info"], o["draft"], cuts=cuts, spk=spk))
         except RuntimeError as e:
             log.append(f"clip {c['id']}: {e}")  # one bad clip must not discard the others
     jsave(j.p("plan.json"), plan)  # focus_x discovered during render is persisted
