@@ -1,5 +1,5 @@
 # Runbook (one page)
-`clipper` = `python -m clipper` if not installed. Jobs: `./clipper-jobs/<id>` (`CLIPPER_JOBS`). Read `SKILL.md` for the decision table.
+`clipper` = `python -m clipper` if not installed. Jobs: `./clipper-jobs/<id>` (`CLIPPER_JOBS`). Read `SKILL.md` for the decision table. Human setup walkthrough: `SETUP.md`.
 
 1. First time: `clipper doctor` (what works here), then `clipper selftest` (offline tests; `--live` adds the RTMP end-to-end tests). Read `memory/learnings.md`.
 2. Recorded video: `clipper run SRC --clips N --export out/` — one command, everything included.

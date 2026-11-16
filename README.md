@@ -9,7 +9,7 @@ clipper watch "https://www.twitch.tv/…" --clips 10 --out live/     # livestrea
 
 No paid service is required. The core is the Python standard library plus an ffmpeg binary; every AI model is optional and downloaded only when you ask. An OpenAI key (optional) is spent sparingly under a hard per-job cap.
 
-* Install: [INSTALLATION.md](INSTALLATION.md) (Windows 11 first). Use from an agent: [SKILL.md](SKILL.md), [docs/MCP.md](docs/MCP.md).
+* **Start here: [SETUP.md](SETUP.md)** (install, first run, livestreams, agents). Install details: [INSTALLATION.md](INSTALLATION.md) (Windows 11 first). Use from an agent: [SKILL.md](SKILL.md), [docs/MCP.md](docs/MCP.md).
 * How it works: [ARCHITECTURE.md](ARCHITECTURE.md). Choices and licences: [TECH_STACK.md](TECH_STACK.md), [THIRD_PARTY.md](THIRD_PARTY.md). Problems: [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 * What was actually tested, and what was not: [docs/VALIDATION.md](docs/VALIDATION.md) and [docs/SPEC.md](docs/SPEC.md). Security: [SECURITY.md](SECURITY.md). Changes: [CHANGELOG.md](CHANGELOG.md).
 
