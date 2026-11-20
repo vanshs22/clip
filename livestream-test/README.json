@@ -1,0 +1,18 @@
+{
+ "source": "https://kick.com/adinross (live, recorded 75 s by `clipper watch`, no speech transcription, no judging: local signals only)",
+ "clips": [
+  {
+   "file": "livestream_clip_1.mp4",
+   "start_in_recording": "0:00:32",
+   "end_in_recording": "0:00:45",
+   "score": 0.774
+  },
+  {
+   "file": "livestream_clip_2.mp4",
+   "start_in_recording": "0:01:10",
+   "end_in_recording": "0:01:23",
+   "score": 0.5663
+  }
+ ],
+ "note": "test output of a third-party stream; delete when done. The chat file is not saved. Twitch ad-break slates are now filtered out (see CHANGELOG)."
+}
